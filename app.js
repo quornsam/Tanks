@@ -1,39 +1,117 @@
 (() => {
   "use strict";
 
-  const PREFIX = "sam-tanks-";
+  const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const TERRAIN_SAMPLES = 420;
+  const WORLD_HEIGHT = 100;
+  const TEAM_NAMES = { blue: "Blue", red: "Red" };
+  const OTHER_TEAM = { blue: "red", red: "blue" };
+  const WIND_LABELS = ["None", "Low", "Medium", "High", "Wild"];
+  const WIND_LIMITS = [0, 1.5, 3.25, 5.5, 8.5];
+  const WORLD_WIDTHS = { compact: 130, standard: 180, wide: 250 };
+  const LOCATION_PRESETS = {
+    earth: { label: "Earth", gravity: 9.81, wind: 2, terrainBase: 26 },
+    moon: { label: "Moon", gravity: 1.62, wind: 0, terrainBase: 22 },
+    mars: { label: "Mars", gravity: 3.71, wind: 2, terrainBase: 25 },
+    space: { label: "Space asteroid", gravity: 0.65, wind: 1, terrainBase: 21 }
+  };
 
   const $ = (id) => document.getElementById(id);
-  const startPanel = $("startPanel");
-  const roomPanel = $("roomPanel");
-  const hostButton = $("hostButton");
-  const joinButton = $("joinButton");
-  const joinCode = $("joinCode");
-  const statusDot = $("statusDot");
-  const statusText = $("statusText");
-  const hostCodeArea = $("hostCodeArea");
-  const hostCode = $("hostCode");
-  const copyCodeButton = $("copyCodeButton");
-  const incomingArea = $("incomingArea");
-  const acceptButton = $("acceptButton");
-  const declineButton = $("declineButton");
-  const controlsArea = $("controlsArea");
-  const angle = $("angle");
-  const power = $("power");
-  const angleOutput = $("angleOutput");
-  const powerOutput = $("powerOutput");
-  const fireButton = $("fireButton");
-  const log = $("log");
-  const resetButton = $("resetButton");
+  const dom = {
+    homeScreen: $("homeScreen"),
+    lobbyScreen: $("lobbyScreen"),
+    gameScreen: $("gameScreen"),
+    connectionPill: $("connectionPill"),
+    connectionText: $("connectionText"),
+    locationSelect: $("locationSelect"),
+    gravityInput: $("gravityInput"),
+    gravityOutput: $("gravityOutput"),
+    tankSizeInput: $("tankSizeInput"),
+    tankSizeOutput: $("tankSizeOutput"),
+    worldSizeSelect: $("worldSizeSelect"),
+    windInput: $("windInput"),
+    windOutput: $("windOutput"),
+    hitsInput: $("hitsInput"),
+    hitsOutput: $("hitsOutput"),
+    presetButton: $("presetButton"),
+    hostButton: $("hostButton"),
+    botButton: $("botButton"),
+    joinCode: $("joinCode"),
+    joinButton: $("joinButton"),
+    homeNotice: $("homeNotice"),
+    lobbyTitle: $("lobbyTitle"),
+    lobbyMessage: $("lobbyMessage"),
+    roomCodeWrap: $("roomCodeWrap"),
+    roomCode: $("roomCode"),
+    copyCodeButton: $("copyCodeButton"),
+    incomingRequest: $("incomingRequest"),
+    declineButton: $("declineButton"),
+    acceptButton: $("acceptButton"),
+    rulesSummary: $("rulesSummary"),
+    lobbyLog: $("lobbyLog"),
+    leaveLobbyButton: $("leaveLobbyButton"),
+    blueRoleLabel: $("blueRoleLabel"),
+    redRoleLabel: $("redRoleLabel"),
+    blueHits: $("blueHits"),
+    redHits: $("redHits"),
+    turnLabel: $("turnLabel"),
+    windLabel: $("windLabel"),
+    worldLabel: $("worldLabel"),
+    canvasFrame: $("canvasFrame"),
+    canvas: $("gameCanvas"),
+    canvasMessage: $("canvasMessage"),
+    fullscreenButton: $("fullscreenButton"),
+    moveLeftButton: $("moveLeftButton"),
+    moveRightButton: $("moveRightButton"),
+    moveStatus: $("moveStatus"),
+    angleInput: $("angleInput"),
+    angleOutput: $("angleOutput"),
+    powerInput: $("powerInput"),
+    powerOutput: $("powerOutput"),
+    fireButton: $("fireButton"),
+    telemetryWind: $("telemetryWind"),
+    telemetryGravity: $("telemetryGravity"),
+    telemetryMove: $("telemetryMove"),
+    telemetryHits: $("telemetryHits"),
+    connectionBadge: $("connectionBadge"),
+    soundButton: $("soundButton"),
+    chatLog: $("chatLog"),
+    chatForm: $("chatForm"),
+    chatInput: $("chatInput"),
+    eventLog: $("eventLog"),
+    leaveGameButton: $("leaveGameButton")
+  };
+
+  const ctx = dom.canvas.getContext("2d");
 
   let peer = null;
   let connection = null;
   let pendingConnection = null;
   let role = null;
   let accepted = false;
-  let isResetting = false;
   let acceptRequested = false;
+  let isResetting = false;
+  let gameState = null;
+  let animation = null;
+  let localInputPending = false;
+  let botTimer = null;
+  let soundEnabled = true;
+  let audioContext = null;
+  let lastFrameTime = performance.now();
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function round(value, places = 2) {
+    const factor = 10 ** places;
+    return Math.round(value * factor) / factor;
+  }
+
+  function deepClone(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
 
   function makeCode(length = 6) {
     const bytes = new Uint32Array(length);
@@ -45,35 +123,119 @@
     return value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
   }
 
-  function setStatus(text, kind = "waiting") {
-    statusText.textContent = text;
-    statusDot.className = "status-dot";
-    if (kind === "connected") statusDot.classList.add("connected");
-    if (kind === "error") statusDot.classList.add("error");
+  function mulberry32(seed) {
+    let value = seed >>> 0;
+    return () => {
+      value += 0x6D2B79F5;
+      let t = value;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
   }
 
-  function addLog(message, kind = "") {
+  function randomSeed() {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return values[0];
+  }
+
+  function setScreen(name) {
+    dom.homeScreen.classList.toggle("hidden", name !== "home");
+    dom.lobbyScreen.classList.toggle("hidden", name !== "lobby");
+    dom.gameScreen.classList.toggle("hidden", name !== "game");
+  }
+
+  function setConnectionStatus(text, kind = "offline") {
+    dom.connectionText.textContent = text;
+    dom.connectionPill.className = `connection-pill ${kind}`;
+  }
+
+  function addLobbyLog(message) {
     const row = document.createElement("div");
-    row.className = `log-entry ${kind}`.trim();
-    const time = document.createElement("span");
-    time.className = "log-time";
+    row.className = "log-row";
+    const time = document.createElement("time");
     time.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     row.append(time, document.createTextNode(message));
-    log.appendChild(row);
-    log.scrollTop = log.scrollHeight;
+    dom.lobbyLog.appendChild(row);
+    dom.lobbyLog.scrollTop = dom.lobbyLog.scrollHeight;
   }
 
-  function showRoom() {
-    startPanel.classList.add("hidden");
-    roomPanel.classList.remove("hidden");
+  function addEvent(message, kind = "") {
+    const row = document.createElement("div");
+    row.className = `event-row ${kind}`.trim();
+    row.textContent = `${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}  ${message}`;
+    dom.eventLog.appendChild(row);
+    dom.eventLog.scrollTop = dom.eventLog.scrollHeight;
+  }
+
+  function addChatMessage(sender, text, mine = false, bot = false) {
+    const bubble = document.createElement("div");
+    bubble.className = `chat-message${mine ? " mine" : ""}${bot ? " bot" : ""}`;
+    const label = document.createElement("strong");
+    label.textContent = sender;
+    bubble.append(label, document.createTextNode(text));
+    dom.chatLog.appendChild(bubble);
+    dom.chatLog.scrollTop = dom.chatLog.scrollHeight;
   }
 
   function libraryAvailable() {
     if (typeof window.Peer === "function") return true;
-    showRoom();
-    setStatus("PeerJS could not load", "error");
-    addLog("The PeerJS library did not load. Check the internet connection or content-blocking settings.", "bad");
+    dom.homeNotice.textContent = "The connection library did not load. Check the internet connection or content-blocking settings.";
+    setConnectionStatus("PeerJS unavailable", "error");
     return false;
+  }
+
+  function readSettings() {
+    return {
+      location: dom.locationSelect.value,
+      gravity: Number(dom.gravityInput.value),
+      tankSize: Number(dom.tankSizeInput.value),
+      worldSize: dom.worldSizeSelect.value,
+      worldWidth: WORLD_WIDTHS[dom.worldSizeSelect.value],
+      windVariability: Number(dom.windInput.value),
+      hitsToDestroy: Number(dom.hitsInput.value)
+    };
+  }
+
+  function applyLocationPreset() {
+    const preset = LOCATION_PRESETS[dom.locationSelect.value];
+    dom.gravityInput.value = preset.gravity;
+    dom.windInput.value = preset.wind;
+    updateSettingOutputs();
+  }
+
+  function updateSettingOutputs() {
+    dom.gravityOutput.textContent = Number(dom.gravityInput.value).toFixed(2);
+    dom.tankSizeOutput.textContent = `${dom.tankSizeInput.value}%`;
+    dom.windOutput.textContent = WIND_LABELS[Number(dom.windInput.value)];
+    dom.hitsOutput.textContent = dom.hitsInput.value;
+  }
+
+  function renderRulesSummary(settings) {
+    const values = [
+      ["Location", LOCATION_PRESETS[settings.location].label],
+      ["Gravity", settings.gravity.toFixed(2)],
+      ["Tank", `${settings.tankSize}%`],
+      ["World", capitalize(settings.worldSize)],
+      ["Wind", WIND_LABELS[settings.windVariability]],
+      ["Direct hits", settings.hitsToDestroy]
+    ];
+    dom.rulesSummary.replaceChildren();
+    values.forEach(([label, value]) => {
+      const chip = document.createElement("div");
+      chip.className = "rule-chip";
+      const labelNode = document.createElement("span");
+      const valueNode = document.createElement("strong");
+      labelNode.textContent = label;
+      valueNode.textContent = value;
+      chip.append(labelNode, valueNode);
+      dom.rulesSummary.appendChild(chip);
+    });
+  }
+
+  function capitalize(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   function commonPeerEvents(instance) {
@@ -81,55 +243,61 @@
       if (isResetting) return;
       console.error(error);
       const messages = {
-        "peer-unavailable": "That host code was not found. Check the code and try again.",
-        "network": "The signalling service could not be reached.",
-        "server-error": "The signalling service reported an error.",
+        "peer-unavailable": "That host code was not found.",
+        network: "The introduction service could not be reached.",
+        "server-error": "The introduction service reported an error.",
         "socket-error": "The signalling connection failed.",
         "socket-closed": "The signalling connection closed.",
-        "browser-incompatible": "This browser does not support the required WebRTC features.",
+        "browser-incompatible": "This browser does not support WebRTC.",
         "invalid-id": "The room code was rejected.",
-        "unavailable-id": "That room code is already in use. Creating another one…"
+        "unavailable-id": "That room code is already being used."
       };
 
       if (role === "host" && error.type === "unavailable-id") {
         safelyDestroyPeer();
-        setTimeout(startHost, 150);
+        setTimeout(startHost, 120);
         return;
       }
 
-      const message = messages[error.type] || `Connection error: ${error.type || error.message || "unknown error"}`;
-      setStatus("Connection error", "error");
-      addLog(message, "bad");
+      const message = messages[error.type] || `Connection error: ${error.type || error.message || "unknown"}`;
+      setConnectionStatus("Connection error", "error");
+      if (!dom.lobbyScreen.classList.contains("hidden")) addLobbyLog(message);
+      if (!dom.gameScreen.classList.contains("hidden")) {
+        addEvent(message, "error");
+        showCanvasMessage("CONNECTION LOST");
+      }
     });
 
     instance.on("disconnected", () => {
-      if (!isResetting && (!connection || !connection.open)) {
-        setStatus("Signalling service disconnected", "error");
-        addLog("The introduction service disconnected before the peer link was ready.", "bad");
-      }
+      if (isResetting || (connection && connection.open)) return;
+      setConnectionStatus("Introduction lost", "error");
+      addLobbyLog("The introduction service disconnected before the direct link was ready.");
     });
   }
 
   function startHost() {
     if (!libraryAvailable()) return;
+    resetTransientState(false);
     role = "host";
     accepted = false;
-    showRoom();
-    hostCodeArea.classList.remove("hidden");
-    controlsArea.classList.add("hidden");
-    incomingArea.classList.add("hidden");
-    setStatus("Creating host code…");
+    const settings = readSettings();
+    renderRulesSummary(settings);
+    dom.lobbyTitle.textContent = "Waiting for a challenger";
+    dom.lobbyMessage.textContent = "Share the code. The match data will travel directly between browsers.";
+    dom.roomCodeWrap.classList.remove("hidden");
+    dom.incomingRequest.classList.add("hidden");
+    setScreen("lobby");
+    setConnectionStatus("Creating room", "waiting");
 
     const code = makeCode();
-    hostCode.textContent = code;
-    addLog("Creating a temporary host identity…");
-
+    dom.roomCode.textContent = code;
+    addLobbyLog("Creating a temporary host identity…");
     peer = new Peer(PREFIX + code, { debug: 1 });
     commonPeerEvents(peer);
 
     peer.on("open", () => {
-      setStatus("Waiting for a guest");
-      addLog(`Host ready. Share code ${code}.`);
+      setConnectionStatus("Waiting for guest", "waiting");
+      addLobbyLog(`Host ready. Share code ${code}.`);
     });
 
     peer.on("connection", (incoming) => {
@@ -137,38 +305,44 @@
         incoming.close();
         return;
       }
-
       pendingConnection = incoming;
       wireConnection(incoming);
-      incomingArea.classList.remove("hidden");
-      setStatus("Guest requesting access");
-      addLog("A guest has reached the host. Accept or decline the request.");
+      dom.incomingRequest.classList.remove("hidden");
+      dom.lobbyTitle.textContent = "Incoming challenger";
+      setConnectionStatus("Approval required", "waiting");
+      addLobbyLog("A guest has reached the host. Accept or decline.");
     });
   }
 
   function startGuest() {
     if (!libraryAvailable()) return;
-    const code = cleanCode(joinCode.value);
-    joinCode.value = code;
+    const code = cleanCode(dom.joinCode.value);
+    dom.joinCode.value = code;
     if (code.length !== 6) {
-      joinCode.focus();
+      dom.homeNotice.textContent = "Enter the complete six-character room code.";
+      dom.joinCode.focus();
       return;
     }
 
+    resetTransientState(false);
     role = "guest";
     accepted = false;
-    showRoom();
-    setStatus("Contacting host…");
-    addLog(`Looking for host ${code}…`);
+    dom.lobbyTitle.textContent = "Contacting host";
+    dom.lobbyMessage.textContent = "The host must approve the connection before the battle begins.";
+    dom.roomCodeWrap.classList.add("hidden");
+    dom.incomingRequest.classList.add("hidden");
+    dom.rulesSummary.innerHTML = '<div class="rule-chip"><span>Rules</span><strong>Waiting for host</strong></div>';
+    setScreen("lobby");
+    setConnectionStatus("Contacting host", "waiting");
+    addLobbyLog(`Looking for room ${code}…`);
 
     peer = new Peer(undefined, { debug: 1 });
     commonPeerEvents(peer);
-
     peer.on("open", () => {
       const outgoing = peer.connect(PREFIX + code, {
         reliable: true,
         serialization: "json",
-        metadata: { application: "tanks-p2p-demo", request: "join" }
+        metadata: { application: "red-blue-tanks", version: 1, request: "join" }
       });
       connection = outgoing;
       wireConnection(outgoing);
@@ -178,76 +352,112 @@
   function wireConnection(conn) {
     conn.on("open", () => {
       if (role === "guest") {
-        setStatus("Waiting for host to accept");
-        addLog("Direct data channel opened. Waiting for the host's approval.");
+        dom.lobbyTitle.textContent = "Waiting for host approval";
+        dom.lobbyMessage.textContent = "The direct data channel is ready.";
+        setConnectionStatus("Awaiting host", "waiting");
+        addLobbyLog("Direct peer channel opened. Waiting for approval.");
       } else {
-        addLog("Direct data channel is ready; approval is still required.");
+        addLobbyLog("Direct data channel is ready.");
         if (acceptRequested) finalizeGuestAcceptance();
       }
     });
 
-    conn.on("data", (data) => {
-      handleData(data);
-    });
+    conn.on("data", handleNetworkData);
 
     conn.on("close", () => {
       if (isResetting) return;
       accepted = false;
-      controlsArea.classList.add("hidden");
-      incomingArea.classList.add("hidden");
-      setStatus("Other player disconnected", "error");
-      addLog("The peer-to-peer connection closed.", "bad");
       connection = null;
       pendingConnection = null;
+      setConnectionStatus("Other player left", "error");
+      if (!dom.gameScreen.classList.contains("hidden")) {
+        addEvent("The other player disconnected.", "error");
+        showCanvasMessage("OPPONENT DISCONNECTED");
+        updateGameControls();
+      } else {
+        dom.lobbyTitle.textContent = "Connection closed";
+        dom.lobbyMessage.textContent = "Return to the start screen and create or join another room.";
+        addLobbyLog("The peer-to-peer connection closed.");
+      }
     });
 
     conn.on("error", (error) => {
       if (isResetting) return;
       console.error(error);
-      setStatus("Peer connection error", "error");
-      addLog(`Peer link error: ${error.message || error.type || "unknown error"}`, "bad");
+      setConnectionStatus("Peer link error", "error");
+      const message = `Peer link error: ${error.message || error.type || "unknown"}`;
+      if (!dom.gameScreen.classList.contains("hidden")) addEvent(message, "error");
+      else addLobbyLog(message);
     });
   }
 
-  function handleData(data) {
-    if (!data || typeof data !== "object") {
-      addLog("Received unrecognised data.", "bad");
-      return;
-    }
+  function handleNetworkData(data) {
+    if (!data || typeof data !== "object") return;
 
-    if (data.type === "accepted") {
-      accepted = true;
-      controlsArea.classList.remove("hidden");
-      setStatus("Connected directly", "connected");
-      addLog("Host accepted. The browsers can now exchange game data directly.", "received");
-      return;
-    }
+    switch (data.type) {
+      case "accepted":
+        if (role !== "guest") return;
+        accepted = true;
+        renderRulesSummary(data.settings);
+        dom.lobbyTitle.textContent = "Host accepted";
+        dom.lobbyMessage.textContent = "Receiving the battlefield…";
+        setConnectionStatus("Connected directly", "online");
+        addLobbyLog("Host accepted the connection.");
+        break;
 
-    if (data.type === "declined") {
-      setStatus("Host declined the request", "error");
-      addLog("The host declined the join request.", "bad");
-      return;
-    }
+      case "declined":
+        if (role !== "guest") return;
+        dom.lobbyTitle.textContent = "Join request declined";
+        dom.lobbyMessage.textContent = "The host did not accept this connection.";
+        setConnectionStatus("Request declined", "error");
+        addLobbyLog("The host declined the join request.");
+        break;
 
-    if (data.type === "shot" && accepted) {
-      addLog(`RECEIVED SHOT — angle ${data.angle}°, power ${data.power}, shot #${data.shotNumber}`, "received");
-      flashReceivedShot(data);
-      return;
-    }
+      case "game-init":
+        if (role !== "guest") return;
+        accepted = true;
+        enterGame(data.state);
+        addEvent("Battlefield received from host.");
+        break;
 
-    if (data.type === "shot-ack" && accepted) {
-      addLog(`Remote browser confirmed shot #${data.shotNumber}.`, "received");
+      case "input":
+        if (role !== "host" || !accepted) return;
+        handleGuestInput(data);
+        break;
+
+      case "state":
+        if (role !== "guest") return;
+        gameState = data.state;
+        localInputPending = false;
+        animation = null;
+        updateGameUI(true);
+        if (data.message) addEvent(data.message);
+        break;
+
+      case "shot":
+        if (role !== "guest") return;
+        localInputPending = false;
+        beginShotAnimation(data.packet);
+        break;
+
+      case "chat":
+        if (typeof data.text !== "string") return;
+        addChatMessage(TEAM_NAMES[data.sender] || "Player", data.text.slice(0, 180));
+        playChatSound();
+        break;
+
+      default:
+        break;
     }
   }
 
   function acceptGuest() {
     if (!pendingConnection) return;
     acceptRequested = true;
-    acceptButton.disabled = true;
-    acceptButton.textContent = "Accepting…";
-
+    dom.acceptButton.disabled = true;
+    dom.acceptButton.textContent = "Accepting…";
     if (pendingConnection.open) finalizeGuestAcceptance();
-    else addLog("Approval recorded; completing the direct data channel…");
+    else addLobbyLog("Approval recorded; completing the direct data channel…");
   }
 
   function finalizeGuestAcceptance() {
@@ -255,68 +465,637 @@
     connection = pendingConnection;
     pendingConnection = null;
     acceptRequested = false;
-    acceptButton.disabled = false;
-    acceptButton.textContent = "Accept";
     accepted = true;
-    incomingArea.classList.add("hidden");
-    controlsArea.classList.remove("hidden");
-    setStatus("Connected directly", "connected");
-    connection.send({ type: "accepted" });
-    addLog("Guest accepted. The peer-to-peer link is active.", "received");
+    dom.acceptButton.disabled = false;
+    dom.acceptButton.textContent = "Accept";
+    dom.incomingRequest.classList.add("hidden");
+    connection.send({ type: "accepted", settings: readSettings() });
+    addLobbyLog("Guest accepted. Generating the shared battlefield…");
+    const state = createGameState(readSettings());
+    connection.send({ type: "game-init", state });
+    enterGame(state);
+    addEvent("Guest connected. Blue fires first.");
   }
 
   function declineGuest() {
     if (!pendingConnection) return;
     acceptRequested = false;
-    acceptButton.disabled = false;
-    acceptButton.textContent = "Accept";
+    dom.acceptButton.disabled = false;
+    dom.acceptButton.textContent = "Accept";
     if (pendingConnection.open) pendingConnection.send({ type: "declined" });
-    setTimeout(() => pendingConnection && pendingConnection.close(), 100);
+    setTimeout(() => pendingConnection && pendingConnection.close(), 80);
     pendingConnection = null;
-    incomingArea.classList.add("hidden");
-    setStatus("Waiting for a guest");
-    addLog("Join request declined.");
+    dom.incomingRequest.classList.add("hidden");
+    dom.lobbyTitle.textContent = "Waiting for a challenger";
+    setConnectionStatus("Waiting for guest", "waiting");
+    addLobbyLog("Join request declined.");
   }
 
-  function sendShot() {
-    if (!connection || !connection.open || !accepted) {
-      addLog("No accepted peer connection is ready.", "bad");
+  function startBotGame() {
+    resetTransientState(false);
+    role = "bot";
+    accepted = true;
+    setConnectionStatus("Computer opponent", "online");
+    const state = createGameState(readSettings());
+    enterGame(state);
+    addEvent("Computer opponent ready. Blue fires first.");
+    addChatMessage("Computer", "Systems online. Try not to scratch the paint.", false, true);
+  }
+
+  function createGameState(settings) {
+    const seed = randomSeed();
+    const terrain = generateTerrain(settings, seed);
+    const blueX = settings.worldWidth * 0.12;
+    const redX = settings.worldWidth * 0.88;
+    return {
+      version: 1,
+      seed,
+      settings,
+      terrain,
+      tanks: {
+        blue: { x: round(blueX, 3), hits: 0, alive: true, angle: 45, power: 62 },
+        red: { x: round(redX, 3), hits: 0, alive: true, angle: 135, power: 62 }
+      },
+      turn: "blue",
+      movedThisTurn: false,
+      wind: randomWind(settings),
+      winner: null,
+      shotNumber: 0
+    };
+  }
+
+  function generateTerrain(settings, seed) {
+    const random = mulberry32(seed);
+    const base = LOCATION_PRESETS[settings.location].terrainBase;
+    const phase1 = random() * Math.PI * 2;
+    const phase2 = random() * Math.PI * 2;
+    const phase3 = random() * Math.PI * 2;
+    const values = [];
+    let drift = 0;
+
+    for (let i = 0; i < TERRAIN_SAMPLES; i += 1) {
+      const t = i / (TERRAIN_SAMPLES - 1);
+      drift = drift * 0.93 + (random() - 0.5) * 1.2;
+      let height = base
+        + Math.sin(t * Math.PI * 2 * 1.35 + phase1) * 8.5
+        + Math.sin(t * Math.PI * 2 * 3.1 + phase2) * 4.2
+        + Math.sin(t * Math.PI * 2 * 6.6 + phase3) * 1.7
+        + drift;
+
+      if (settings.location === "moon") height += Math.sin(t * Math.PI * 11 + phase2) * 1.8;
+      if (settings.location === "mars") height += Math.sin(t * Math.PI * 4 + phase1) * 2.5;
+      if (settings.location === "space") height += Math.sin(t * Math.PI * 8 + phase3) * 2.7;
+      values.push(clamp(height, 10, 49));
+    }
+
+    smoothArray(values, 3);
+    flattenTerrain(values, settings.worldWidth * 0.12, settings.worldWidth, 8.5);
+    flattenTerrain(values, settings.worldWidth * 0.88, settings.worldWidth, 8.5);
+    return values.map(value => round(value, 3));
+  }
+
+  function smoothArray(values, passes = 1) {
+    for (let pass = 0; pass < passes; pass += 1) {
+      const copy = values.slice();
+      for (let i = 2; i < values.length - 2; i += 1) {
+        values[i] = (copy[i - 2] + copy[i - 1] * 2 + copy[i] * 3 + copy[i + 1] * 2 + copy[i + 2]) / 9;
+      }
+    }
+  }
+
+  function flattenTerrain(values, worldX, worldWidth, radius) {
+    const centerIndex = Math.round((worldX / worldWidth) * (values.length - 1));
+    const radiusIndex = Math.max(4, Math.round((radius / worldWidth) * values.length));
+    const target = values[centerIndex];
+    for (let offset = -radiusIndex; offset <= radiusIndex; offset += 1) {
+      const index = centerIndex + offset;
+      if (index < 0 || index >= values.length) continue;
+      const t = Math.abs(offset) / radiusIndex;
+      const blend = Math.cos(t * Math.PI / 2) ** 2;
+      values[index] = values[index] * (1 - blend) + target * blend;
+    }
+  }
+
+  function randomWind(settings) {
+    const limit = WIND_LIMITS[settings.windVariability];
+    if (limit === 0) return 0;
+    return round((Math.random() * 2 - 1) * limit, 2);
+  }
+
+  function enterGame(state) {
+    gameState = state;
+    animation = null;
+    localInputPending = false;
+    dom.chatLog.replaceChildren();
+    dom.eventLog.replaceChildren();
+    dom.canvasMessage.classList.add("hidden");
+    setScreen("game");
+
+    dom.blueRoleLabel.textContent = role === "guest" ? "HOST" : "YOU";
+    dom.redRoleLabel.textContent = role === "guest" ? "YOU" : role === "bot" ? "BOT" : "GUEST";
+    dom.connectionBadge.textContent = role === "bot" ? "LOCAL" : "P2P";
+    setConnectionStatus(role === "bot" ? "Computer opponent" : "Connected directly", "online");
+    updateGameUI(true);
+    ensureAudio();
+  }
+
+  function localTeam() {
+    return role === "guest" ? "red" : "blue";
+  }
+
+  function canLocalAct() {
+    return Boolean(
+      gameState &&
+      !gameState.winner &&
+      !animation &&
+      !localInputPending &&
+      gameState.turn === localTeam() &&
+      (role === "bot" || accepted)
+    );
+  }
+
+  function updateGameUI(syncControls = false) {
+    if (!gameState) return;
+    const { settings, tanks } = gameState;
+    const turnName = TEAM_NAMES[gameState.turn].toUpperCase();
+    dom.turnLabel.textContent = gameState.winner ? `${TEAM_NAMES[gameState.winner].toUpperCase()} WINS` : `${turnName} TURN`;
+    dom.windLabel.textContent = formatWind(gameState.wind);
+    dom.worldLabel.textContent = `${LOCATION_PRESETS[settings.location].label.toUpperCase()} · GRAVITY ${settings.gravity.toFixed(2)}`;
+    dom.telemetryWind.textContent = signed(gameState.wind);
+    dom.telemetryGravity.textContent = settings.gravity.toFixed(2);
+    dom.telemetryMove.textContent = moveStep().toFixed(1);
+    dom.telemetryHits.textContent = String(settings.hitsToDestroy);
+    renderHitPips(dom.blueHits, tanks.blue.hits, settings.hitsToDestroy);
+    renderHitPips(dom.redHits, tanks.red.hits, settings.hitsToDestroy);
+
+    if (syncControls) {
+      const tank = tanks[localTeam()];
+      dom.angleInput.value = tank.angle;
+      dom.powerInput.value = tank.power;
+      dom.angleOutput.textContent = `${Math.round(tank.angle)}°`;
+      dom.powerOutput.textContent = Math.round(tank.power);
+    }
+
+    updateGameControls();
+
+    if (gameState.winner) {
+      showCanvasMessage(`${TEAM_NAMES[gameState.winner].toUpperCase()} WINS`);
+    } else {
+      dom.canvasMessage.classList.add("hidden");
+    }
+
+    if (role === "bot" && gameState.turn === "red" && !gameState.winner && !animation) scheduleBotTurn();
+  }
+
+  function renderHitPips(container, hits, total) {
+    container.replaceChildren();
+    for (let i = 0; i < total; i += 1) {
+      const pip = document.createElement("span");
+      pip.className = `hit-pip${i < hits ? " filled" : ""}`;
+      container.appendChild(pip);
+    }
+  }
+
+  function formatWind(wind) {
+    if (Math.abs(wind) < 0.05) return "WIND CALM";
+    return `WIND ${Math.abs(wind).toFixed(1)} ${wind > 0 ? "→" : "←"}`;
+  }
+
+  function signed(value) {
+    return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+  }
+
+  function updateGameControls() {
+    const enabled = canLocalAct();
+    const moveAvailable = enabled && !gameState.movedThisTurn;
+    dom.moveLeftButton.disabled = !moveAvailable;
+    dom.moveRightButton.disabled = !moveAvailable;
+    dom.angleInput.disabled = !enabled;
+    dom.powerInput.disabled = !enabled;
+    dom.fireButton.disabled = !enabled;
+
+    if (!gameState) return;
+    if (gameState.winner) dom.moveStatus.textContent = "Battle complete";
+    else if (animation) dom.moveStatus.textContent = "Projectile in flight";
+    else if (localInputPending) dom.moveStatus.textContent = "Waiting for host";
+    else if (gameState.turn !== localTeam()) dom.moveStatus.textContent = "Opponent's turn";
+    else if (gameState.movedThisTurn) dom.moveStatus.textContent = "Movement used";
+    else dom.moveStatus.textContent = "Movement available";
+  }
+
+  function moveStep() {
+    if (!gameState) return 2.8;
+    const base = { compact: 2.3, standard: 2.9, wide: 3.7 }[gameState.settings.worldSize];
+    return base * (100 / gameState.settings.tankSize) ** 0.2;
+  }
+
+  function requestMove(direction) {
+    if (!canLocalAct() || gameState.movedThisTurn) return;
+    const team = localTeam();
+    if (role === "guest") {
+      localInputPending = true;
+      connection.send({ type: "input", action: "move", direction });
+      updateGameControls();
+    } else {
+      authoritativeMove(team, direction);
+    }
+  }
+
+  function authoritativeMove(team, direction) {
+    if (!gameState || animation || gameState.winner || gameState.turn !== team || gameState.movedThisTurn) return false;
+    const tank = gameState.tanks[team];
+    const other = gameState.tanks[OTHER_TEAM[team]];
+    const step = moveStep() * Math.sign(direction);
+    const minX = gameState.settings.worldWidth * 0.045;
+    const maxX = gameState.settings.worldWidth * 0.955;
+    const candidate = clamp(tank.x + step, minX, maxX);
+    const currentHeight = terrainAt(tank.x, gameState);
+    const candidateHeight = terrainAt(candidate, gameState);
+    const safeDistance = tankWorldWidth() * 1.25;
+
+    if (Math.abs(candidate - other.x) < safeDistance) {
+      rejectGuestInput("Movement blocked by the other tank.");
+      return false;
+    }
+
+    if (Math.abs(candidateHeight - currentHeight) > tankWorldHeight() * 0.8) {
+      rejectGuestInput("The slope is too steep for that move.");
+      return false;
+    }
+
+    tank.x = round(candidate, 3);
+    gameState.movedThisTurn = true;
+    localInputPending = false;
+    const message = `${TEAM_NAMES[team]} moved ${direction < 0 ? "left" : "right"}.`;
+    addEvent(message);
+    broadcastState(message);
+    updateGameUI(true);
+    return true;
+  }
+
+  function rejectGuestInput(message) {
+    if (role === "host" && connection && connection.open) {
+      connection.send({ type: "state", state: gameState, message });
+    }
+    addEvent(message);
+  }
+
+  function requestFire() {
+    if (!canLocalAct()) return;
+    const angle = Number(dom.angleInput.value);
+    const power = Number(dom.powerInput.value);
+    const team = localTeam();
+
+    if (role === "guest") {
+      localInputPending = true;
+      connection.send({ type: "input", action: "fire", angle, power });
+      updateGameControls();
+    } else {
+      authoritativeFire(team, angle, power);
+    }
+  }
+
+  function handleGuestInput(data) {
+    if (!gameState || gameState.turn !== "red" || animation || gameState.winner) {
+      rejectGuestInput("Input ignored because it is not Red's active turn.");
       return;
+    }
+    if (data.action === "move") {
+      authoritativeMove("red", Number(data.direction));
+    } else if (data.action === "fire") {
+      authoritativeFire("red", Number(data.angle), Number(data.power));
+    }
+  }
+
+  function authoritativeFire(team, angle, power) {
+    if (!gameState || animation || gameState.winner || gameState.turn !== team) return;
+    const safeAngle = clamp(Number.isFinite(angle) ? angle : 45, 5, 175);
+    const safePower = clamp(Number.isFinite(power) ? power : 60, 18, 100);
+    gameState.tanks[team].angle = round(safeAngle, 1);
+    gameState.tanks[team].power = round(safePower, 1);
+
+    const result = simulateShot(gameState, team, safeAngle, safePower, true);
+    const resultingState = deepClone(gameState);
+    resultingState.shotNumber += 1;
+
+    if (result.impact && result.impact.type !== "out") {
+      applyCrater(resultingState, result.impact.x, result.impact.y, craterRadius());
+    }
+
+    if (result.hitTeam) {
+      resultingState.tanks[result.hitTeam].hits += 1;
+      if (resultingState.tanks[result.hitTeam].hits >= resultingState.settings.hitsToDestroy) {
+        resultingState.tanks[result.hitTeam].alive = false;
+        resultingState.winner = OTHER_TEAM[result.hitTeam];
+      }
+    }
+
+    if (!resultingState.winner) {
+      resultingState.turn = OTHER_TEAM[team];
+      resultingState.movedThisTurn = false;
+      resultingState.wind = randomWind(resultingState.settings);
     }
 
     const packet = {
-      type: "shot",
-      angle: Number(angle.value),
-      power: Number(power.value),
-      shotNumber: Date.now()
+      shooter: team,
+      angle: round(safeAngle, 1),
+      power: round(safePower, 1),
+      trajectory: result.trajectory,
+      impact: result.impact,
+      hitTeam: result.hitTeam,
+      resultingState
     };
 
-    connection.send(packet);
-    addLog(`SENT SHOT — angle ${packet.angle}°, power ${packet.power}`, "sent");
+    if (role === "host" && connection && connection.open) connection.send({ type: "shot", packet });
+    beginShotAnimation(packet);
   }
 
-  function flashReceivedShot(data) {
-    const previous = fireButton.textContent;
-    fireButton.textContent = `INCOMING: ${data.angle}° / POWER ${data.power}`;
-    fireButton.disabled = true;
-    setTimeout(() => {
-      fireButton.textContent = previous;
-      fireButton.disabled = false;
-    }, 850);
-    if (connection && connection.open) {
-      connection.send({ type: "shot-ack", shotNumber: data.shotNumber });
+  function simulateShot(state, team, angle, power, recordTrajectory) {
+    const tank = state.tanks[team];
+    const origin = muzzlePosition(state, team, angle);
+    const radians = angle * Math.PI / 180;
+    const speed = power * 0.60;
+    let x = origin.x;
+    let y = origin.y;
+    let vx = Math.cos(radians) * speed;
+    let vy = Math.sin(radians) * speed;
+    const dt = 0.035;
+    const trajectory = [{ x: round(x), y: round(y) }];
+    const maxSteps = 2600;
+
+    for (let step = 0; step < maxSteps; step += 1) {
+      vx += state.wind * 0.2 * dt;
+      vy -= state.settings.gravity * dt;
+      x += vx * dt;
+      y += vy * dt;
+
+      if (recordTrajectory && step % 2 === 0) trajectory.push({ x: round(x), y: round(y) });
+
+      if (x < 0 || x > state.settings.worldWidth || y < -5) {
+        if (recordTrajectory) trajectory.push({ x: round(x), y: round(y) });
+        return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null };
+      }
+
+      for (const checkedTeam of ["blue", "red"]) {
+        if (checkedTeam === team && step < 14) continue;
+        const center = tankCenter(state, checkedTeam);
+        const radius = tankCollisionRadius();
+        const dx = x - center.x;
+        const dy = y - center.y;
+        if (dx * dx + dy * dy <= radius * radius) {
+          if (recordTrajectory) trajectory.push({ x: round(x), y: round(y) });
+          return {
+            trajectory,
+            impact: { x: round(x), y: round(y), type: "tank" },
+            hitTeam: checkedTeam
+          };
+        }
+      }
+
+      const ground = terrainAt(x, state);
+      if (step > 4 && y <= ground) {
+        if (recordTrajectory) trajectory.push({ x: round(x), y: round(ground) });
+        return {
+          trajectory,
+          impact: { x: round(x), y: round(ground), type: "terrain" },
+          hitTeam: null
+        };
+      }
+    }
+
+    return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null };
+  }
+
+  function muzzlePosition(state, team, angle = state.tanks[team].angle) {
+    const center = tankCenter(state, team);
+    const radians = angle * Math.PI / 180;
+    const length = tankWorldWidth() * 0.72;
+    return {
+      x: center.x + Math.cos(radians) * length,
+      y: center.y + Math.sin(radians) * length
+    };
+  }
+
+  function tankCenter(state, team) {
+    const tank = state.tanks[team];
+    return {
+      x: tank.x,
+      y: terrainAt(tank.x, state) + tankWorldHeight() * 0.72
+    };
+  }
+
+  function tankScale() {
+    return gameState ? gameState.settings.tankSize / 100 : 1;
+  }
+
+  function tankWorldWidth() {
+    return 7.2 * tankScale();
+  }
+
+  function tankWorldHeight() {
+    return 3.6 * tankScale();
+  }
+
+  function tankCollisionRadius() {
+    return 3.5 * tankScale();
+  }
+
+  function craterRadius() {
+    return 5.5 * tankScale();
+  }
+
+  function terrainAt(x, state = gameState) {
+    if (!state) return 0;
+    const position = clamp(x / state.settings.worldWidth, 0, 1) * (state.terrain.length - 1);
+    const index = Math.floor(position);
+    const fraction = position - index;
+    const a = state.terrain[index];
+    const b = state.terrain[Math.min(index + 1, state.terrain.length - 1)];
+    return a + (b - a) * fraction;
+  }
+
+  function terrainSlopeAt(x, state = gameState) {
+    const delta = state.settings.worldWidth / state.terrain.length * 2;
+    return (terrainAt(x + delta, state) - terrainAt(x - delta, state)) / (delta * 2);
+  }
+
+  function applyCrater(state, impactX, impactY, radius) {
+    const centerIndex = (impactX / state.settings.worldWidth) * (state.terrain.length - 1);
+    const radiusIndex = Math.ceil((radius / state.settings.worldWidth) * state.terrain.length);
+    for (let offset = -radiusIndex; offset <= radiusIndex; offset += 1) {
+      const index = Math.round(centerIndex + offset);
+      if (index < 0 || index >= state.terrain.length) continue;
+      const worldX = (index / (state.terrain.length - 1)) * state.settings.worldWidth;
+      const distance = Math.abs(worldX - impactX);
+      if (distance > radius) continue;
+      const normal = distance / radius;
+      const depth = radius * 0.72 * (1 - normal * normal);
+      const rim = radius * 0.12 * Math.exp(-((normal - 0.9) ** 2) / 0.02);
+      state.terrain[index] = round(clamp(state.terrain[index] - depth + rim, 3, WORLD_HEIGHT - 5), 3);
+    }
+    smoothLocalTerrain(state.terrain, Math.round(centerIndex), radiusIndex + 2);
+  }
+
+  function smoothLocalTerrain(values, center, radius) {
+    const copy = values.slice();
+    for (let i = Math.max(1, center - radius); i <= Math.min(values.length - 2, center + radius); i += 1) {
+      values[i] = round(copy[i] * 0.72 + (copy[i - 1] + copy[i + 1]) * 0.14, 3);
     }
   }
 
-  async function copyCode() {
-    const code = hostCode.textContent;
-    try {
-      await navigator.clipboard.writeText(code);
-      copyCodeButton.textContent = "Copied";
-      setTimeout(() => { copyCodeButton.textContent = "Copy"; }, 1200);
-    } catch {
-      addLog(`Copy was blocked. Manually copy: ${code}`, "bad");
+  function beginShotAnimation(packet) {
+    if (!packet || !Array.isArray(packet.trajectory) || packet.trajectory.length < 2) return;
+    localInputPending = false;
+    animation = {
+      packet,
+      start: performance.now(),
+      travelDuration: clamp(packet.trajectory.length * 7.5, 700, 2650),
+      explosionDuration: packet.impact && packet.impact.type !== "out" ? 520 : 180,
+      phase: "travel"
+    };
+    playFireSound();
+    addEvent(`${TEAM_NAMES[packet.shooter]} fired at ${packet.angle}° with power ${Math.round(packet.power)}.`);
+    updateGameControls();
+  }
+
+  function finishShotAnimation() {
+    if (!animation) return;
+    const packet = animation.packet;
+    gameState = packet.resultingState;
+    animation = null;
+
+    if (packet.hitTeam) {
+      addEvent(`DIRECT HIT on ${TEAM_NAMES[packet.hitTeam]}!`, "hit");
+      playHitSound();
+    } else if (packet.impact && packet.impact.type === "terrain") {
+      addEvent("Terrain impact.");
+    } else {
+      addEvent("Shot left the battlefield.");
     }
+
+    if (gameState.winner) {
+      addEvent(`${TEAM_NAMES[gameState.winner]} wins the battle.`, "hit");
+      playVictorySound();
+    }
+
+    updateGameUI(true);
+  }
+
+  function broadcastState(message = "") {
+    if (role === "host" && connection && connection.open) {
+      connection.send({ type: "state", state: gameState, message });
+    }
+  }
+
+  function scheduleBotTurn() {
+    if (botTimer || role !== "bot" || !gameState || gameState.turn !== "red" || animation || gameState.winner) return;
+    botTimer = setTimeout(() => {
+      botTimer = null;
+      if (!gameState || gameState.turn !== "red" || animation || gameState.winner) return;
+
+      if (!gameState.movedThisTurn && Math.random() < 0.42) {
+        const direction = gameState.tanks.red.x > gameState.settings.worldWidth * 0.76 ? -1 : (Math.random() < 0.5 ? -1 : 1);
+        authoritativeMove("red", direction);
+      }
+
+      botTimer = setTimeout(() => {
+        botTimer = null;
+        if (!gameState || gameState.turn !== "red" || animation || gameState.winner) return;
+        const aim = calculateBotAim();
+        dom.angleInput.value = aim.angle;
+        dom.powerInput.value = aim.power;
+        authoritativeFire("red", aim.angle, aim.power);
+      }, 650);
+    }, 700);
+  }
+
+  function calculateBotAim() {
+    let best = { angle: 135, power: 60, score: Infinity };
+    const target = tankCenter(gameState, "blue");
+    const shooter = "red";
+
+    for (let angle = 98; angle <= 175; angle += 3) {
+      for (let power = 24; power <= 100; power += 4) {
+        const score = quickShotScore(shooter, angle, power, target);
+        if (score < best.score) best = { angle, power, score };
+        if (score < 0.4) break;
+      }
+    }
+
+    const errorAngle = (Math.random() - 0.5) * 2.2;
+    const errorPower = (Math.random() - 0.5) * 3.6;
+    return {
+      angle: round(clamp(best.angle + errorAngle, 95, 175), 1),
+      power: round(clamp(best.power + errorPower, 20, 100), 1)
+    };
+  }
+
+  function quickShotScore(team, angle, power, target) {
+    const origin = muzzlePosition(gameState, team, angle);
+    const radians = angle * Math.PI / 180;
+    const speed = power * 0.60;
+    let x = origin.x;
+    let y = origin.y;
+    let vx = Math.cos(radians) * speed;
+    let vy = Math.sin(radians) * speed;
+    const dt = 0.075;
+    let bestDistance = Infinity;
+
+    for (let step = 0; step < 900; step += 1) {
+      vx += gameState.wind * 0.2 * dt;
+      vy -= gameState.settings.gravity * dt;
+      x += vx * dt;
+      y += vy * dt;
+      const distance = Math.hypot(x - target.x, y - target.y);
+      bestDistance = Math.min(bestDistance, distance);
+      if (distance <= tankCollisionRadius()) return 0;
+      if (x < 0 || x > gameState.settings.worldWidth || y < -4) break;
+      if (step > 3 && y <= terrainAt(x, gameState)) break;
+    }
+    return bestDistance;
+  }
+
+  function submitChat(event) {
+    event.preventDefault();
+    if (!gameState) return;
+    const text = dom.chatInput.value.trim().slice(0, 180);
+    if (!text) return;
+    const team = localTeam();
+    addChatMessage("You", text, true);
+    dom.chatInput.value = "";
+
+    if (role === "bot") {
+      const replies = [
+        "Wind correction noted.",
+        "I calculate a 63 percent chance you miss.",
+        "Your crater collection is impressive.",
+        "Adjusting elevation.",
+        "Blue paint is surprisingly visible from here.",
+        "Message received. Target still acquired."
+      ];
+      setTimeout(() => addChatMessage("Computer", replies[Math.floor(Math.random() * replies.length)], false, true), 650);
+    } else if (connection && connection.open && accepted) {
+      connection.send({ type: "chat", sender: team, text });
+    }
+  }
+
+  function showCanvasMessage(message) {
+    dom.canvasMessage.textContent = message;
+    dom.canvasMessage.classList.remove("hidden");
+  }
+
+  function resetTransientState(clearLobby = true) {
+    clearTimeout(botTimer);
+    botTimer = null;
+    animation = null;
+    gameState = null;
+    localInputPending = false;
+    acceptRequested = false;
+    dom.homeNotice.textContent = "";
+    dom.chatLog.replaceChildren();
+    dom.eventLog.replaceChildren();
+    dom.canvasMessage.classList.add("hidden");
+    if (clearLobby) dom.lobbyLog.replaceChildren();
   }
 
   function safelyDestroyPeer() {
@@ -330,33 +1109,668 @@
 
   function resetAll() {
     isResetting = true;
+    clearTimeout(botTimer);
+    botTimer = null;
     safelyDestroyPeer();
     role = null;
     accepted = false;
     acceptRequested = false;
-    acceptButton.disabled = false;
-    acceptButton.textContent = "Accept";
-    log.replaceChildren();
-    hostCodeArea.classList.add("hidden");
-    incomingArea.classList.add("hidden");
-    controlsArea.classList.add("hidden");
-    roomPanel.classList.add("hidden");
-    startPanel.classList.remove("hidden");
-    joinCode.value = "";
-    setStatus("Starting…");
-    setTimeout(() => { isResetting = false; }, 50);
+    gameState = null;
+    animation = null;
+    localInputPending = false;
+    dom.lobbyLog.replaceChildren();
+    dom.chatLog.replaceChildren();
+    dom.eventLog.replaceChildren();
+    dom.roomCodeWrap.classList.add("hidden");
+    dom.incomingRequest.classList.add("hidden");
+    dom.joinCode.value = "";
+    dom.canvasMessage.classList.add("hidden");
+    dom.acceptButton.disabled = false;
+    dom.acceptButton.textContent = "Accept";
+    setConnectionStatus("Not connected", "offline");
+    setScreen("home");
+    setTimeout(() => { isResetting = false; }, 60);
   }
 
-  hostButton.addEventListener("click", startHost);
-  joinButton.addEventListener("click", startGuest);
-  joinCode.addEventListener("input", () => { joinCode.value = cleanCode(joinCode.value); });
-  joinCode.addEventListener("keydown", (event) => { if (event.key === "Enter") startGuest(); });
-  copyCodeButton.addEventListener("click", copyCode);
-  acceptButton.addEventListener("click", acceptGuest);
-  declineButton.addEventListener("click", declineGuest);
-  fireButton.addEventListener("click", sendShot);
-  resetButton.addEventListener("click", resetAll);
-  angle.addEventListener("input", () => { angleOutput.textContent = `${angle.value}°`; });
-  power.addEventListener("input", () => { powerOutput.textContent = power.value; });
+  function copyRoomCode() {
+    const code = dom.roomCode.textContent;
+    navigator.clipboard.writeText(code).then(() => {
+      dom.copyCodeButton.textContent = "Copied";
+      setTimeout(() => { dom.copyCodeButton.textContent = "Copy"; }, 1100);
+    }).catch(() => addLobbyLog(`Copy was blocked. Manually copy ${code}.`));
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      dom.canvasFrame.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }
+
+  function ensureAudio() {
+    if (!audioContext) {
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtor) audioContext = new AudioCtor();
+    }
+    if (audioContext && audioContext.state === "suspended") audioContext.resume().catch(() => {});
+  }
+
+  function tone(frequency, duration, type = "sine", volume = 0.05, delay = 0) {
+    if (!soundEnabled) return;
+    ensureAudio();
+    if (!audioContext) return;
+    const start = audioContext.currentTime + delay;
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain).connect(audioContext.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.02);
+  }
+
+  function noiseBurst(duration = 0.22, volume = 0.09) {
+    if (!soundEnabled) return;
+    ensureAudio();
+    if (!audioContext) return;
+    const length = Math.floor(audioContext.sampleRate * duration);
+    const buffer = audioContext.createBuffer(1, length, audioContext.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+    const source = audioContext.createBufferSource();
+    const gain = audioContext.createGain();
+    const filter = audioContext.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 1200;
+    gain.gain.value = volume;
+    source.buffer = buffer;
+    source.connect(filter).connect(gain).connect(audioContext.destination);
+    source.start();
+  }
+
+  function playFireSound() {
+    tone(160, .16, "sawtooth", .045);
+    tone(75, .22, "square", .035, .04);
+  }
+
+  function playHitSound() {
+    noiseBurst(.36, .12);
+    tone(62, .45, "sine", .09);
+  }
+
+  function playVictorySound() {
+    tone(330, .18, "triangle", .05);
+    tone(440, .18, "triangle", .05, .16);
+    tone(660, .35, "triangle", .06, .32);
+  }
+
+  function playChatSound() {
+    tone(620, .08, "sine", .025);
+    tone(810, .09, "sine", .018, .06);
+  }
+
+  function canvasMetrics() {
+    return {
+      width: dom.canvas.width,
+      height: dom.canvas.height,
+      sx: dom.canvas.width / gameState.settings.worldWidth,
+      sy: dom.canvas.height / WORLD_HEIGHT
+    };
+  }
+
+  function worldToCanvas(x, y) {
+    const metrics = canvasMetrics();
+    return { x: x * metrics.sx, y: metrics.height - y * metrics.sy };
+  }
+
+  function renderFrame(now) {
+    const elapsed = Math.min(100, now - lastFrameTime);
+    lastFrameTime = now;
+    if (gameState) drawGame(now, elapsed);
+    else drawIdleCanvas(now);
+    requestAnimationFrame(renderFrame);
+  }
+
+  function drawIdleCanvas() {
+    ctx.clearRect(0, 0, dom.canvas.width, dom.canvas.height);
+  }
+
+  function drawGame(now) {
+    ctx.clearRect(0, 0, dom.canvas.width, dom.canvas.height);
+    drawSky(now);
+    drawDistantLandscape();
+    drawTerrain();
+    drawAimGuide();
+    drawTank("blue", now);
+    drawTank("red", now);
+    drawProjectileAnimation(now);
+    drawVignette();
+  }
+
+  function drawSky(now) {
+    const width = dom.canvas.width;
+    const height = dom.canvas.height;
+    const location = gameState.settings.location;
+    let top;
+    let bottom;
+
+    if (location === "earth") {
+      top = "#337fbd";
+      bottom = "#a7d8ec";
+    } else if (location === "mars") {
+      top = "#7d2d28";
+      bottom = "#e69b6f";
+    } else if (location === "moon") {
+      top = "#030711";
+      bottom = "#101827";
+    } else {
+      top = "#09051a";
+      bottom = "#21133d";
+    }
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, top);
+    gradient.addColorStop(1, bottom);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+
+    if (location === "earth") drawEarthSky(now);
+    if (location === "mars") drawMarsSky();
+    if (location === "moon") drawMoonSky();
+    if (location === "space") drawSpaceSky(now);
+  }
+
+  function drawEarthSky(now) {
+    const width = dom.canvas.width;
+    const height = dom.canvas.height;
+    ctx.save();
+    const sun = ctx.createRadialGradient(width * .79, height * .17, 5, width * .79, height * .17, 82);
+    sun.addColorStop(0, "rgba(255,248,190,.95)");
+    sun.addColorStop(.23, "rgba(255,224,132,.75)");
+    sun.addColorStop(1, "rgba(255,224,132,0)");
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = "rgba(255,255,255,.28)";
+    for (let i = 0; i < 5; i += 1) {
+      const x = ((i * 310 + now * .006) % (width + 220)) - 110;
+      const y = 95 + (i % 3) * 54;
+      drawCloud(x, y, .8 + (i % 2) * .22);
+    }
+    ctx.restore();
+  }
+
+  function drawCloud(x, y, scale) {
+    ctx.beginPath();
+    ctx.ellipse(x, y, 48 * scale, 16 * scale, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + 34 * scale, y - 8 * scale, 34 * scale, 22 * scale, 0, 0, Math.PI * 2);
+    ctx.ellipse(x - 31 * scale, y - 5 * scale, 28 * scale, 19 * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawMarsSky() {
+    const width = dom.canvas.width;
+    const height = dom.canvas.height;
+    ctx.save();
+    ctx.fillStyle = "rgba(255,205,155,.75)";
+    ctx.beginPath();
+    ctx.arc(width * .78, height * .17, 45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,230,210,.8)";
+    ctx.beginPath();
+    ctx.arc(width * .18, height * .14, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(width * .24, height * .1, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(100,38,31,.16)";
+    for (let i = 0; i < 7; i += 1) {
+      ctx.fillRect(0, height * (.2 + i * .06), width, 2);
+    }
+    ctx.restore();
+  }
+
+  function drawMoonSky() {
+    drawStars(95, "rgba(255,255,255,.72)", 2.1);
+    const width = dom.canvas.width;
+    const height = dom.canvas.height;
+    const earth = ctx.createRadialGradient(width * .76, height * .18, 2, width * .76, height * .18, 55);
+    earth.addColorStop(0, "#e7f6ff");
+    earth.addColorStop(.42, "#4da4d9");
+    earth.addColorStop(.72, "#237448");
+    earth.addColorStop(1, "rgba(20,45,70,0)");
+    ctx.fillStyle = earth;
+    ctx.beginPath();
+    ctx.arc(width * .76, height * .18, 55, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawSpaceSky(now) {
+    drawStars(150, "rgba(255,255,255,.82)", 2.4);
+    const width = dom.canvas.width;
+    const height = dom.canvas.height;
+    const nebula = ctx.createRadialGradient(width * .3, height * .18, 20, width * .3, height * .18, 260);
+    nebula.addColorStop(0, "rgba(128,78,205,.26)");
+    nebula.addColorStop(.45, "rgba(49,110,176,.12)");
+    nebula.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = nebula;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.save();
+    ctx.translate(width * .83, height * .16);
+    ctx.rotate(now * .00001);
+    const planet = ctx.createRadialGradient(-15, -18, 2, 0, 0, 62);
+    planet.addColorStop(0, "#f3bd82");
+    planet.addColorStop(.55, "#9f5b8e");
+    planet.addColorStop(1, "#321b55");
+    ctx.fillStyle = planet;
+    ctx.beginPath();
+    ctx.arc(0, 0, 62, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(230,202,255,.45)";
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 94, 20, -.25, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawStars(count, color, maxRadius) {
+    const random = mulberry32(gameState.seed ^ 0x9e3779b9);
+    ctx.fillStyle = color;
+    for (let i = 0; i < count; i += 1) {
+      const x = random() * dom.canvas.width;
+      const y = random() * dom.canvas.height * .64;
+      const radius = .35 + random() * maxRadius;
+      ctx.globalAlpha = .35 + random() * .65;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawDistantLandscape() {
+    const location = gameState.settings.location;
+    const width = dom.canvas.width;
+    const height = dom.canvas.height;
+    ctx.save();
+    ctx.globalAlpha = location === "earth" ? .18 : .25;
+    ctx.fillStyle = location === "earth" ? "#345869" : location === "mars" ? "#6c332b" : "#4a5060";
+    ctx.beginPath();
+    ctx.moveTo(0, height * .72);
+    for (let x = 0; x <= width; x += 80) {
+      const y = height * (.55 + .09 * Math.sin(x * .009 + gameState.seed * .00003));
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, height);
+    ctx.lineTo(0, height);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawTerrain() {
+    const metrics = canvasMetrics();
+    const location = gameState.settings.location;
+    const colors = {
+      earth: ["#55784d", "#253e2d", "#15241c"],
+      mars: ["#a65236", "#663024", "#351b18"],
+      moon: ["#858b93", "#3e444d", "#242932"],
+      space: ["#756579", "#40364d", "#241b30"]
+    }[location];
+
+    const gradient = ctx.createLinearGradient(0, metrics.height * .45, 0, metrics.height);
+    gradient.addColorStop(0, colors[0]);
+    gradient.addColorStop(.45, colors[1]);
+    gradient.addColorStop(1, colors[2]);
+
+    ctx.beginPath();
+    ctx.moveTo(0, metrics.height);
+    gameState.terrain.forEach((heightValue, index) => {
+      const x = index / (gameState.terrain.length - 1) * metrics.width;
+      const y = metrics.height - heightValue * metrics.sy;
+      ctx.lineTo(x, y);
+    });
+    ctx.lineTo(metrics.width, metrics.height);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    ctx.beginPath();
+    gameState.terrain.forEach((heightValue, index) => {
+      const x = index / (gameState.terrain.length - 1) * metrics.width;
+      const y = metrics.height - heightValue * metrics.sy;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = location === "earth" ? "#8faf6e" : location === "mars" ? "#d27a53" : "#b0b4ba";
+    ctx.stroke();
+
+    const random = mulberry32(gameState.seed ^ 0x85ebca6b);
+    ctx.globalAlpha = .16;
+    ctx.fillStyle = "#ffffff";
+    for (let i = 0; i < 95; i += 1) {
+      const xWorld = random() * gameState.settings.worldWidth;
+      const ground = terrainAt(xWorld);
+      const depth = 1 + random() * 12;
+      const p = worldToCanvas(xWorld, Math.max(1, ground - depth));
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, .7 + random() * 1.7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawTank(team, now) {
+    const tank = gameState.tanks[team];
+    const ground = terrainAt(tank.x);
+    const position = worldToCanvas(tank.x, ground);
+    const metrics = canvasMetrics();
+    const bodyWidth = tankWorldWidth() * metrics.sx;
+    const bodyHeight = tankWorldHeight() * metrics.sy;
+    const slope = terrainSlopeAt(tank.x);
+    const bodyAngle = clamp(-Math.atan(slope * metrics.sy / metrics.sx), -.3, .3);
+    const color = team === "blue" ? "#4fa4ff" : "#ff5c63";
+    const dark = team === "blue" ? "#1c5d9e" : "#9d2733";
+
+    ctx.save();
+    ctx.translate(position.x, position.y - bodyHeight * .46);
+    ctx.rotate(bodyAngle);
+
+    ctx.fillStyle = "rgba(0,0,0,.22)";
+    ctx.beginPath();
+    ctx.ellipse(0, bodyHeight * .64, bodyWidth * .62, bodyHeight * .26, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#17202c";
+    roundedRect(ctx, -bodyWidth * .54, bodyHeight * .08, bodyWidth * 1.08, bodyHeight * .48, bodyHeight * .19);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const bodyGradient = ctx.createLinearGradient(0, -bodyHeight * .4, 0, bodyHeight * .32);
+    bodyGradient.addColorStop(0, color);
+    bodyGradient.addColorStop(1, dark);
+    ctx.fillStyle = bodyGradient;
+    roundedRect(ctx, -bodyWidth * .5, -bodyHeight * .2, bodyWidth, bodyHeight * .46, bodyHeight * .13);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.22)";
+    ctx.stroke();
+    ctx.restore();
+
+    const center = tankCenter(gameState, team);
+    const centerCanvas = worldToCanvas(center.x, center.y);
+    const turretRadius = bodyHeight * .34;
+    ctx.save();
+    ctx.translate(centerCanvas.x, centerCanvas.y);
+    const barrelAngle = -(tank.angle * Math.PI / 180);
+    ctx.rotate(barrelAngle);
+    const barrelGradient = ctx.createLinearGradient(0, 0, bodyWidth * .7, 0);
+    barrelGradient.addColorStop(0, dark);
+    barrelGradient.addColorStop(1, color);
+    ctx.fillStyle = barrelGradient;
+    roundedRect(ctx, 0, -bodyHeight * .095, bodyWidth * .72, bodyHeight * .19, bodyHeight * .08);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(centerCanvas.x, centerCanvas.y, turretRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.28)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    if (tank.hits > 0 && tank.alive) drawTankSmoke(centerCanvas.x, centerCanvas.y, tank.hits, now);
+    if (!tank.alive) drawDestroyedTank(centerCanvas.x, centerCanvas.y, color, now);
+  }
+
+  function roundedRect(context, x, y, width, height, radius) {
+    const r = Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2);
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.arcTo(x + width, y, x + width, y + height, r);
+    context.arcTo(x + width, y + height, x, y + height, r);
+    context.arcTo(x, y + height, x, y, r);
+    context.arcTo(x, y, x + width, y, r);
+    context.closePath();
+  }
+
+  function drawTankSmoke(x, y, hits, now) {
+    ctx.save();
+    for (let i = 0; i < Math.min(5, hits + 1); i += 1) {
+      const phase = (now * .00035 + i * .21) % 1;
+      const drift = Math.sin(now * .001 + i) * 8;
+      ctx.globalAlpha = (1 - phase) * .27;
+      ctx.fillStyle = "#20242a";
+      ctx.beginPath();
+      ctx.arc(x + drift, y - 15 - phase * 55, 7 + phase * 13, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawDestroyedTank(x, y, color, now) {
+    const pulse = .5 + Math.sin(now * .012) * .12;
+    ctx.save();
+    ctx.globalAlpha = .75;
+    ctx.fillStyle = "#171717";
+    ctx.beginPath();
+    ctx.arc(x, y - 5, 26 + pulse * 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - 18, y - 28);
+    ctx.lineTo(x + 17, y + 8);
+    ctx.moveTo(x + 18, y - 28);
+    ctx.lineTo(x - 17, y + 8);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawAimGuide() {
+    if (!canLocalAct()) return;
+    const team = localTeam();
+    const angle = Number(dom.angleInput.value);
+    const power = Number(dom.powerInput.value);
+    gameState.tanks[team].angle = angle;
+    gameState.tanks[team].power = power;
+    const origin = muzzlePosition(gameState, team, angle);
+    const radians = angle * Math.PI / 180;
+    let x = origin.x;
+    let y = origin.y;
+    let vx = Math.cos(radians) * power * .60;
+    let vy = Math.sin(radians) * power * .60;
+    const dt = .12;
+    ctx.save();
+    ctx.fillStyle = team === "blue" ? "rgba(172,220,255,.65)" : "rgba(255,190,194,.65)";
+    for (let i = 0; i < 18; i += 1) {
+      vx += gameState.wind * .2 * dt;
+      vy -= gameState.settings.gravity * dt;
+      x += vx * dt;
+      y += vy * dt;
+      if (x < 0 || x > gameState.settings.worldWidth || y <= terrainAt(x)) break;
+      const point = worldToCanvas(x, y);
+      ctx.globalAlpha = 1 - i / 22;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawProjectileAnimation(now) {
+    if (!animation) return;
+    const elapsed = now - animation.start;
+    const packet = animation.packet;
+
+    if (animation.phase === "travel") {
+      const progress = clamp(elapsed / animation.travelDuration, 0, 1);
+      const exactIndex = progress * (packet.trajectory.length - 1);
+      const index = Math.floor(exactIndex);
+      const nextIndex = Math.min(index + 1, packet.trajectory.length - 1);
+      const blend = exactIndex - index;
+      const a = packet.trajectory[index];
+      const b = packet.trajectory[nextIndex];
+      const x = a.x + (b.x - a.x) * blend;
+      const y = a.y + (b.y - a.y) * blend;
+      drawProjectileTrail(packet.trajectory, index);
+      drawProjectile(x, y, packet.shooter);
+
+      if (progress >= 1) {
+        animation.phase = "explosion";
+        animation.explosionStart = now;
+        if (packet.impact && packet.impact.type !== "out") {
+          noiseBurst(.3, .08);
+        }
+      }
+    } else {
+      const explosionProgress = clamp((now - animation.explosionStart) / animation.explosionDuration, 0, 1);
+      if (packet.impact && packet.impact.type !== "out") drawExplosion(packet.impact.x, packet.impact.y, explosionProgress, packet.hitTeam);
+      if (explosionProgress >= 1) finishShotAnimation();
+    }
+  }
+
+  function drawProjectileTrail(trajectory, currentIndex) {
+    const start = Math.max(0, currentIndex - 22);
+    ctx.save();
+    ctx.lineCap = "round";
+    for (let i = start + 1; i <= currentIndex; i += 1) {
+      const a = worldToCanvas(trajectory[i - 1].x, trajectory[i - 1].y);
+      const b = worldToCanvas(trajectory[i].x, trajectory[i].y);
+      ctx.globalAlpha = (i - start) / (currentIndex - start + 1) * .5;
+      ctx.strokeStyle = "#fff6d4";
+      ctx.lineWidth = 1 + (i - start) / 10;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawProjectile(x, y, team) {
+    const p = worldToCanvas(x, y);
+    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 18);
+    glow.addColorStop(0, "rgba(255,255,255,1)");
+    glow.addColorStop(.24, team === "blue" ? "rgba(79,164,255,.95)" : "rgba(255,92,99,.95)");
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "white";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawExplosion(x, y, progress, hitTeam) {
+    const p = worldToCanvas(x, y);
+    const radius = 16 + Math.sin(progress * Math.PI) * 80;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const blast = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
+    blast.addColorStop(0, "rgba(255,255,245,.98)");
+    blast.addColorStop(.22, "rgba(255,215,84,.92)");
+    blast.addColorStop(.58, hitTeam ? "rgba(255,64,55,.72)" : "rgba(255,124,56,.65)");
+    blast.addColorStop(1, "rgba(80,20,10,0)");
+    ctx.fillStyle = blast;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    const random = mulberry32((gameState.shotNumber + 1) * 1299709);
+    for (let i = 0; i < 24; i += 1) {
+      const angle = random() * Math.PI * 2;
+      const distance = progress * (30 + random() * 90);
+      const px = p.x + Math.cos(angle) * distance;
+      const py = p.y + Math.sin(angle) * distance;
+      ctx.globalAlpha = 1 - progress;
+      ctx.fillStyle = i % 2 ? "#ffca61" : "#ff654e";
+      ctx.beginPath();
+      ctx.arc(px, py, 2 + random() * 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawVignette() {
+    const width = dom.canvas.width;
+    const height = dom.canvas.height;
+    const vignette = ctx.createRadialGradient(width / 2, height / 2, height * .25, width / 2, height / 2, height * .78);
+    vignette.addColorStop(0, "rgba(0,0,0,0)");
+    vignette.addColorStop(1, "rgba(0,0,0,.28)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  function toggleSound() {
+    soundEnabled = !soundEnabled;
+    dom.soundButton.classList.toggle("active", soundEnabled);
+    dom.soundButton.textContent = soundEnabled ? "♪" : "×";
+    if (soundEnabled) playChatSound();
+  }
+
+  function updateAimOutputs() {
+    dom.angleOutput.textContent = `${dom.angleInput.value}°`;
+    dom.powerOutput.textContent = dom.powerInput.value;
+  }
+
+  function keyboardControls(event) {
+    if (dom.gameScreen.classList.contains("hidden")) return;
+    if (document.activeElement === dom.chatInput) return;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      requestMove(-1);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      requestMove(1);
+    } else if (event.key === " " || event.code === "Space") {
+      event.preventDefault();
+      requestFire();
+    }
+  }
+
+  dom.locationSelect.addEventListener("change", applyLocationPreset);
+  dom.gravityInput.addEventListener("input", updateSettingOutputs);
+  dom.tankSizeInput.addEventListener("input", updateSettingOutputs);
+  dom.windInput.addEventListener("input", updateSettingOutputs);
+  dom.hitsInput.addEventListener("input", updateSettingOutputs);
+  dom.presetButton.addEventListener("click", applyLocationPreset);
+  dom.hostButton.addEventListener("click", startHost);
+  dom.botButton.addEventListener("click", startBotGame);
+  dom.joinCode.addEventListener("input", () => { dom.joinCode.value = cleanCode(dom.joinCode.value); dom.homeNotice.textContent = ""; });
+  dom.joinCode.addEventListener("keydown", event => { if (event.key === "Enter") startGuest(); });
+  dom.joinButton.addEventListener("click", startGuest);
+  dom.copyCodeButton.addEventListener("click", copyRoomCode);
+  dom.acceptButton.addEventListener("click", acceptGuest);
+  dom.declineButton.addEventListener("click", declineGuest);
+  dom.leaveLobbyButton.addEventListener("click", resetAll);
+  dom.moveLeftButton.addEventListener("click", () => requestMove(-1));
+  dom.moveRightButton.addEventListener("click", () => requestMove(1));
+  dom.angleInput.addEventListener("input", updateAimOutputs);
+  dom.powerInput.addEventListener("input", updateAimOutputs);
+  dom.fireButton.addEventListener("click", requestFire);
+  dom.chatForm.addEventListener("submit", submitChat);
+  dom.soundButton.addEventListener("click", toggleSound);
+  dom.fullscreenButton.addEventListener("click", toggleFullscreen);
+  dom.leaveGameButton.addEventListener("click", resetAll);
+  document.addEventListener("keydown", keyboardControls);
+  document.addEventListener("pointerdown", ensureAudio, { once: true });
   window.addEventListener("beforeunload", safelyDestroyPeer);
+
+  updateSettingOutputs();
+  setScreen("home");
+  requestAnimationFrame(renderFrame);
 })();
