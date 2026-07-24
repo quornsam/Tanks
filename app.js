@@ -7,6 +7,8 @@
   const MIN_TERRAIN_SAMPLES = 560;
   const NETWORK_CHUNK_SIZE = 4000;
   const NETWORK_TRANSFER_TTL = 30000;
+  const ACTIVE_RENDER_FPS = 30;
+  const ACTIVE_FRAME_INTERVAL = 1000 / ACTIVE_RENDER_FPS;
   const TEAM_NAMES = { blue: "Blue", red: "Red" };
   const OTHER_TEAM = { blue: "red", red: "blue" };
   const WIND_LABELS = ["None", "Low", "Medium", "High", "Wild"];
@@ -116,7 +118,9 @@
     leaveGameButton: $("leaveGameButton")
   };
 
-  const ctx = dom.canvas.getContext("2d");
+  let ctx = dom.canvas.getContext("2d");
+  const staticCanvas = document.createElement("canvas");
+  const staticCtx = staticCanvas.getContext("2d", { alpha: false });
 
   let peer = null;
   let connection = null;
@@ -140,7 +144,14 @@
   let localActionRequest = null;
   let soundEnabled = true;
   let audioContext = null;
-  let lastFrameTime = performance.now();
+  let renderDirty = true;
+  let staticLayerDirty = true;
+  let resizePending = true;
+  let renderRequestId = null;
+  let renderTimerId = null;
+  let lastRenderedAt = 0;
+  let activeCanvasMetrics = null;
+  let hiddenAt = null;
   let visibilityWarningActive = false;
   let winnerModalDismissed = false;
   let doubleStrikeSelected = false;
@@ -347,10 +358,11 @@
     document.body.classList.toggle("game-active", name === "game");
     placePersistentChat(name);
     updateMenuSessionUI();
-    if (name === "game") requestAnimationFrame(() => {
-      resizeCanvasToDisplaySize();
+    if (name === "game") {
+      markCanvasResize();
       fitPanelsToViewport();
-    });
+      requestRender();
+    }
   }
 
   function hasLiveSession() {
@@ -390,6 +402,9 @@
       setScreen("home");
       return;
     }
+    if (animation) finishShotAnimation();
+    movementAnimation = null;
+    updateGameControls();
     hideCanvasMessage();
     setScreen("home");
     setConnectionStatus(role === "bot" ? "Bot match paused" : "Connected · in menu", "online");
@@ -1200,7 +1215,7 @@
     for (const team of ["blue", "red"]) {
       state.tanks[team].angle = elevationFromWorldAngle(team, state.tanks[team].angle);
     }
-    state.version = 7;
+    state.version = 9;
     return state;
   }
 
@@ -1258,6 +1273,8 @@
     }
 
     if (role === "bot" && gameState.turn === "red" && !gameState.winner && !animation) scheduleBotTurn();
+    invalidateStaticLayer();
+    requestRender();
   }
 
   function renderHitPips(container, hits, total) {
@@ -1667,6 +1684,7 @@
     playFireSound();
     addEvent(`${TEAM_NAMES[packet.shooter]} fired${packet.doubleStrike ? " a DOUBLE STRIKE" : ""} at ${packet.angle}° with power ${Math.round(packet.power)}.`);
     updateGameControls();
+    requestRender();
   }
 
   function finishShotAnimation() {
@@ -1725,6 +1743,7 @@
       local
     };
     updateGameControls();
+    requestRender();
   }
 
   function displayTankX(team, now = performance.now()) {
@@ -2109,7 +2128,7 @@
     dom.fullscreenButton.textContent = active ? "×" : "⛶";
     dom.fullscreenButton.title = active ? "Exit full screen" : "Full screen";
     dom.fullscreenButton.setAttribute("aria-label", active ? "Exit full screen" : "Full screen");
-    requestAnimationFrame(resizeCanvasToDisplaySize);
+    markCanvasResize();
   }
 
   function resetInspectionView(announce = true) {
@@ -2129,6 +2148,8 @@
     dom.locatorButton.title = "Inspect terrain";
     dom.locatorButton.setAttribute("aria-label", "Inspect terrain");
     dom.canvasViewLabel.textContent = "WHOLE BATTLEFIELD";
+    invalidateStaticLayer();
+    requestRender();
     if (announce && gameState) addEvent("Whole battlefield view restored.");
   }
 
@@ -2152,6 +2173,8 @@
     dom.locatorButton.setAttribute("aria-label", "Return to whole battlefield");
     dom.canvasViewLabel.textContent = "INSPECT TERRAIN · DRAG · WHEEL OR PINCH";
     playLocatorSound();
+    invalidateStaticLayer();
+    requestRender();
     addEvent("Terrain inspection active. Drag to pan; wheel or pinch to zoom.");
   }
 
@@ -2217,6 +2240,7 @@
     gameState.tanks[team].angle = round(elevation, 1);
     gameState.tanks[team].power = round(power, 1);
     updateAimOutputs();
+    requestRender();
   }
 
   function handleCanvasPointerDown(event) {
@@ -2242,6 +2266,8 @@
       inspectionCamera.pinchDistance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
       inspectionCamera.pinchZoom = inspectionCamera.zoom;
     }
+    invalidateStaticLayer();
+    requestRender();
     event.preventDefault();
   }
 
@@ -2274,6 +2300,8 @@
     }
     inspectionCamera.lastClientX = event.clientX;
     inspectionCamera.lastClientY = event.clientY;
+    invalidateStaticLayer();
+    requestRender();
     event.preventDefault();
   }
 
@@ -2286,6 +2314,7 @@
     inspectionCamera.pointers.delete(event.pointerId);
     inspectionCamera.dragging = inspectionCamera.pointers.size > 0;
     if (inspectionCamera.pointers.size < 2) inspectionCamera.pinchDistance = 0;
+    requestRender();
   }
 
 
@@ -2301,16 +2330,25 @@
     inspectionCamera.targetX = before.x;
     inspectionCamera.targetY = before.y;
     clampInspectionCenter();
+    invalidateStaticLayer();
+    requestRender();
+  }
+
+  function markCanvasResize() {
+    resizePending = true;
+    requestRender();
   }
 
   function resizeCanvasToDisplaySize() {
     const rect = dom.canvas.getBoundingClientRect();
     const width = Math.max(320, Math.round(rect.width));
     const height = Math.max(180, Math.round(rect.height));
-    if (dom.canvas.width !== width || dom.canvas.height !== height) {
-      dom.canvas.width = width;
-      dom.canvas.height = height;
-    }
+    if (dom.canvas.width === width && dom.canvas.height === height) return false;
+    dom.canvas.width = width;
+    dom.canvas.height = height;
+    staticCanvas.width = width;
+    staticCanvas.height = height;
+    return true;
   }
 
   function ensureAudio() {
@@ -2434,7 +2472,7 @@
     tone(620, .12, "triangle", .022, .16);
   }
 
-  function canvasMetrics() {
+  function computeCanvasMetrics() {
     const bounds = currentViewBounds();
     return {
       width: dom.canvas.width,
@@ -2448,6 +2486,10 @@
     };
   }
 
+  function canvasMetrics() {
+    return activeCanvasMetrics || computeCanvasMetrics();
+  }
+
   function worldToCanvas(x, y) {
     const metrics = canvasMetrics();
     return {
@@ -2456,18 +2498,92 @@
     };
   }
 
+  function invalidateStaticLayer() {
+    staticLayerDirty = true;
+    renderDirty = true;
+  }
+
+  function hasActiveVisualAnimation() {
+    return Boolean(animation || movementAnimation);
+  }
+
+  function clearScheduledRender() {
+    if (renderRequestId !== null) cancelAnimationFrame(renderRequestId);
+    if (renderTimerId !== null) clearTimeout(renderTimerId);
+    renderRequestId = null;
+    renderTimerId = null;
+  }
+
+  function scheduleRender() {
+    if (document.hidden || renderRequestId !== null || renderTimerId !== null) return;
+    const elapsed = performance.now() - lastRenderedAt;
+    const delay = lastRenderedAt > 0 ? Math.max(0, ACTIVE_FRAME_INTERVAL - elapsed) : 0;
+    if (delay > 1) {
+      renderTimerId = setTimeout(() => {
+        renderTimerId = null;
+        if (!document.hidden && renderRequestId === null) {
+          renderRequestId = requestAnimationFrame(renderFrame);
+        }
+      }, delay);
+    } else {
+      renderRequestId = requestAnimationFrame(renderFrame);
+    }
+  }
+
+  function requestRender() {
+    renderDirty = true;
+    scheduleRender();
+  }
+
+  function rebuildStaticLayer(now) {
+    if (!gameState) return;
+    if (staticCanvas.width !== dom.canvas.width || staticCanvas.height !== dom.canvas.height) {
+      staticCanvas.width = dom.canvas.width;
+      staticCanvas.height = dom.canvas.height;
+    }
+
+    const screenCtx = ctx;
+    ctx = staticCtx;
+    activeCanvasMetrics = computeCanvasMetrics();
+    ctx.clearRect(0, 0, staticCanvas.width, staticCanvas.height);
+    drawSky(now);
+    drawDistantLandscape();
+    drawTerrain();
+    if (gameState.ceiling) drawCaveCeiling();
+    drawTankPads();
+    activeCanvasMetrics = null;
+    ctx = screenCtx;
+    staticLayerDirty = false;
+  }
+
   function renderFrame(now) {
-    resizeCanvasToDisplaySize();
-    const elapsed = Math.min(100, now - lastFrameTime);
-    lastFrameTime = now;
+    renderRequestId = null;
+    if (document.hidden) return;
+
+    if (resizePending) {
+      resizePending = false;
+      if (resizeCanvasToDisplaySize()) invalidateStaticLayer();
+    }
+
     if (movementAnimation && now - movementAnimation.start >= movementAnimation.duration) {
       movementAnimation = null;
       updateGameControls();
+      renderDirty = true;
       if (role === "bot" && gameState?.turn === "red") scheduleBotTurn();
     }
-    if (gameState) drawGame(now, elapsed);
-    else drawIdleCanvas(now);
-    requestAnimationFrame(renderFrame);
+
+    const animating = hasActiveVisualAnimation();
+    if (!renderDirty && !animating) return;
+
+    renderDirty = false;
+    lastRenderedAt = now;
+
+    if (currentScreen === "game") {
+      if (gameState) drawGame(now);
+      else drawIdleCanvas();
+    }
+
+    if (renderDirty || hasActiveVisualAnimation()) scheduleRender();
   }
 
   function drawIdleCanvas() {
@@ -2475,18 +2591,17 @@
   }
 
   function drawGame(now) {
+    if (staticLayerDirty) rebuildStaticLayer(now);
+    activeCanvasMetrics = computeCanvasMetrics();
     ctx.clearRect(0, 0, dom.canvas.width, dom.canvas.height);
-    drawSky(now);
-    drawDistantLandscape();
-    drawTerrain();
-    if (gameState.ceiling) drawCaveCeiling();
-    drawTankPads();
+    ctx.drawImage(staticCanvas, 0, 0);
     drawAimGuide();
     drawTank("blue", now);
     drawTank("red", now);
     drawInspectionReticle(now);
     drawProjectileAnimation(now);
     drawVignette();
+    activeCanvasMetrics = null;
   }
 
   function drawSky(now) {
@@ -2655,7 +2770,7 @@
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    gameState.ceiling.forEach((heightValue, index) => {
+    forEachVisibleTerrainSample(gameState.ceiling, (heightValue, index) => {
       const worldX = index / (gameState.ceiling.length - 1) * gameState.settings.worldWidth;
       const point = worldToCanvas(worldX, heightValue);
       ctx.lineTo(point.x, point.y);
@@ -2693,10 +2808,10 @@
     ctx.restore();
 
     ctx.beginPath();
-    gameState.ceiling.forEach((heightValue, index) => {
+    forEachVisibleTerrainSample(gameState.ceiling, (heightValue, index, first) => {
       const worldX = index / (gameState.ceiling.length - 1) * gameState.settings.worldWidth;
       const point = worldToCanvas(worldX, heightValue);
-      if (index === 0) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
+      if (first) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
     });
     ctx.strokeStyle = "#918765";
     ctx.lineWidth = 2;
@@ -2745,12 +2860,32 @@
     ctx.restore();
   }
 
+  function forEachVisibleTerrainSample(values, callback) {
+    const metrics = canvasMetrics();
+    const bounds = currentViewBounds();
+    const lastIndex = values.length - 1;
+    const worldWidth = gameState.settings.worldWidth;
+    const startIndex = Math.max(0, Math.floor(bounds.minX / worldWidth * lastIndex) - 2);
+    const endIndex = Math.min(lastIndex, Math.ceil(bounds.maxX / worldWidth * lastIndex) + 2);
+    const targetPoints = Math.max(320, Math.ceil(metrics.width * 1.25));
+    const step = Math.max(1, Math.ceil((endIndex - startIndex) / targetPoints));
+    let first = true;
+    let finalIndex = startIndex;
+
+    for (let index = startIndex; index <= endIndex; index += step) {
+      callback(values[index], index, first);
+      first = false;
+      finalIndex = index;
+    }
+    if (finalIndex !== endIndex) callback(values[endIndex], endIndex, false);
+  }
+
   function terrainSurfacePath() {
     ctx.beginPath();
-    gameState.terrain.forEach((heightValue, index) => {
+    forEachVisibleTerrainSample(gameState.terrain, (heightValue, index, first) => {
       const worldX = index / (gameState.terrain.length - 1) * gameState.settings.worldWidth;
       const point = worldToCanvas(worldX, heightValue);
-      if (index === 0) ctx.moveTo(point.x, point.y);
+      if (first) ctx.moveTo(point.x, point.y);
       else ctx.lineTo(point.x, point.y);
     });
   }
@@ -2773,7 +2908,7 @@
 
     ctx.beginPath();
     ctx.moveTo(0, metrics.height);
-    gameState.terrain.forEach((heightValue, index) => {
+    forEachVisibleTerrainSample(gameState.terrain, (heightValue, index) => {
       const worldX = index / (gameState.terrain.length - 1) * gameState.settings.worldWidth;
       const point = worldToCanvas(worldX, heightValue);
       ctx.lineTo(point.x, point.y);
@@ -2787,7 +2922,7 @@
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(0, metrics.height);
-    gameState.terrain.forEach((heightValue, index) => {
+    forEachVisibleTerrainSample(gameState.terrain, (heightValue, index) => {
       const worldX = index / (gameState.terrain.length - 1) * gameState.settings.worldWidth;
       const point = worldToCanvas(worldX, heightValue);
       ctx.lineTo(point.x, point.y);
@@ -3331,7 +3466,7 @@
       button.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${name}`);
       button.setAttribute("aria-expanded", String(!collapsed));
     }
-    requestAnimationFrame(resizeCanvasToDisplaySize);
+    markCanvasResize();
   }
 
   function fitPanelsToViewport() {
@@ -3386,6 +3521,7 @@
   function updateAimOutputs() {
     dom.angleOutput.textContent = `${dom.angleInput.value}°`;
     dom.powerOutput.textContent = dom.powerInput.value;
+    requestRender();
   }
 
   function keyboardControls(event) {
@@ -3461,13 +3597,44 @@
   document.querySelectorAll(".collapse-button").forEach(button => {
     button.addEventListener("click", () => togglePanel(button.closest(".collapsible-panel")));
   });
+  const canvasResizeObserver = typeof ResizeObserver === "function"
+    ? new ResizeObserver(() => {
+        markCanvasResize();
+        fitPanelsToViewport();
+      })
+    : null;
+  canvasResizeObserver?.observe(dom.canvasFrame);
+
   window.addEventListener("resize", () => {
-    resizeCanvasToDisplaySize();
+    markCanvasResize();
     fitPanelsToViewport();
+  });
+  document.addEventListener("visibilitychange", () => {
+    const now = performance.now();
+    if (document.hidden) {
+      hiddenAt = now;
+      clearScheduledRender();
+      if (botTimer) {
+        clearTimeout(botTimer);
+        botTimer = null;
+      }
+      return;
+    }
+
+    if (hiddenAt !== null) {
+      const pausedFor = now - hiddenAt;
+      if (animation) {
+        animation.start += pausedFor;
+        if (animation.explosionStart) animation.explosionStart += pausedFor;
+      }
+      if (movementAnimation) movementAnimation.start += pausedFor;
+      hiddenAt = null;
+    }
+    markCanvasResize();
+    if (role === "bot" && gameState?.turn === "red" && !gameState.winner && !animation) scheduleBotTurn();
   });
   window.addEventListener("beforeunload", safelyDestroyPeer);
 
   updateSettingOutputs();
   setScreen("home");
-  requestAnimationFrame(renderFrame);
 })();
