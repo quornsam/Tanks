@@ -249,3 +249,70 @@ input[type="range"] { width: 100%; accent-color: var(--blue); }
   .controls-panel { gap: 10px; padding: 11px; }
   .canvas-frame { border-radius: 12px; }
 }
+
+/* v2 match, replay and battlefield controls */
+.turn-card { min-width: 235px; }
+.scoreboard-strip {
+  width: min(100%, 290px);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(154, 168, 188, .2);
+  font-size: .58rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.scoreboard-strip span:first-child { color: #8fc7ff; text-align: left; }
+.scoreboard-strip span:last-child { color: #ff9da2; text-align: right; }
+.scoreboard-strip em { color: var(--muted); font-style: normal; }
+.scoreboard-strip b { color: #fff; font-size: .86rem; }
+.canvas-message { z-index: 8; }
+.canvas-dialog {
+  width: min(520px, calc(100% - 32px));
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: clamp(22px, 5vw, 38px);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 18px;
+  background: rgba(8, 14, 24, .86);
+  box-shadow: 0 24px 70px rgba(0,0,0,.45);
+  backdrop-filter: blur(10px);
+}
+.canvas-dialog > strong { font-size: clamp(1.45rem, 4vw, 3rem); line-height: .95; }
+.canvas-dialog > span { color: #c6d1e1; font-size: clamp(.72rem, 1.5vw, .95rem); font-weight: 650; letter-spacing: 0; text-shadow: none; }
+.canvas-message-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; margin-top: 10px; }
+.overlay-primary, .overlay-secondary {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 15px;
+  font-weight: 900;
+}
+.overlay-primary { color: #062018; background: var(--green); }
+.overlay-secondary { color: #fff; background: #5c2935; }
+.round-action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.round-action-button {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 11px 9px;
+  color: var(--text);
+  background: #162238;
+  text-align: left;
+}
+.round-action-button:hover { border-color: #587093; background: #1c2c47; }
+.round-action-button strong { font-size: .78rem; }
+.round-action-button span { color: var(--muted); font-size: .61rem; }
+.round-control-note { margin: 10px 0 0; color: var(--muted); font-size: .65rem; line-height: 1.4; }
+@media (max-width: 800px) {
+  .turn-card { min-width: 0; }
+}
+@media (max-width: 560px) {
+  .scoreboard-strip { width: 100%; }
+  .canvas-dialog { padding: 20px 15px; }
+  .round-action-grid { grid-template-columns: 1fr 1fr; }
+}
