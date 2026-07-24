@@ -14,7 +14,8 @@
     earth: { label: "Earth", gravity: 9.81, wind: 2, terrainBase: 26 },
     moon: { label: "Moon", gravity: 1.62, wind: 0, terrainBase: 22 },
     mars: { label: "Mars", gravity: 3.71, wind: 2, terrainBase: 25 },
-    space: { label: "Space asteroid", gravity: 0.65, wind: 1, terrainBase: 21 }
+    space: { label: "Space asteroid", gravity: 0.65, wind: 1, terrainBase: 21 },
+    cave: { label: "Cave", gravity: 9.81, wind: 0, terrainBase: 20 }
   };
 
   const $ = (id) => document.getElementById(id);
@@ -42,6 +43,12 @@
     joinCode: $("joinCode"),
     joinButton: $("joinButton"),
     homeNotice: $("homeNotice"),
+    connectedMenuBar: $("connectedMenuBar"),
+    connectedMenuTitle: $("connectedMenuTitle"),
+    connectedMenuText: $("connectedMenuText"),
+    resumeBattleButton: $("resumeBattleButton"),
+    disconnectSessionButton: $("disconnectSessionButton"),
+    menuChatDock: $("menuChatDock"),
     lobbyTitle: $("lobbyTitle"),
     lobbyMessage: $("lobbyMessage"),
     roomCodeWrap: $("roomCodeWrap"),
@@ -59,7 +66,6 @@
     redHits: $("redHits"),
     turnLabel: $("turnLabel"),
     windLabel: $("windLabel"),
-    worldLabel: $("worldLabel"),
     blueScore: $("blueScore"),
     redScore: $("redScore"),
     roundNumber: $("roundNumber"),
@@ -85,18 +91,24 @@
     powerInput: $("powerInput"),
     powerOutput: $("powerOutput"),
     fireButton: $("fireButton"),
+    doubleStrikeButton: $("doubleStrikeButton"),
     telemetryWind: $("telemetryWind"),
     telemetryGravity: $("telemetryGravity"),
     telemetryMove: $("telemetryMove"),
     telemetryHits: $("telemetryHits"),
     connectionBadge: $("connectionBadge"),
     soundButton: $("soundButton"),
+    worldToolButton: $("worldToolButton"),
+    sideColumn: $("sideColumn"),
+    chatPanel: $("chatPanel"),
     chatLog: $("chatLog"),
     chatForm: $("chatForm"),
     chatInput: $("chatInput"),
     eventLog: $("eventLog"),
     restartRoundButton: $("restartRoundButton"),
     regenerateMapButton: $("regenerateMapButton"),
+    gameLocationSelect: $("gameLocationSelect"),
+    changeWorldButton: $("changeWorldButton"),
     roundControlBadge: $("roundControlBadge"),
     roundControlNote: $("roundControlNote"),
     leaveGameButton: $("leaveGameButton")
@@ -113,6 +125,7 @@
   let isResetting = false;
   let gameState = null;
   let animation = null;
+  let movementAnimation = null;
   let localInputPending = false;
   let botTimer = null;
   let pendingActionRequest = null;
@@ -122,6 +135,9 @@
   let lastFrameTime = performance.now();
   let visibilityWarningActive = false;
   let winnerModalDismissed = false;
+  let doubleStrikeSelected = false;
+  let currentScreen = "home";
+  const aimDrag = { active: false, pointerId: null };
   const inspectionCamera = {
     active: false,
     centerX: 0,
@@ -178,14 +194,60 @@
   }
 
   function setScreen(name) {
+    currentScreen = name;
     dom.homeScreen.classList.toggle("hidden", name !== "home");
     dom.lobbyScreen.classList.toggle("hidden", name !== "lobby");
     dom.gameScreen.classList.toggle("hidden", name !== "game");
     document.body.classList.toggle("game-active", name === "game");
+    placePersistentChat(name);
+    updateMenuSessionUI();
     if (name === "game") requestAnimationFrame(() => {
       resizeCanvasToDisplaySize();
       fitPanelsToViewport();
     });
+  }
+
+  function hasLiveSession() {
+    return Boolean(gameState && (role === "bot" || (accepted && connection && connection.open)));
+  }
+
+  function placePersistentChat(screenName = currentScreen) {
+    if (!dom.chatPanel || !dom.sideColumn || !dom.menuChatDock) return;
+    if (screenName === "home" && hasLiveSession()) {
+      if (dom.chatPanel.parentElement !== dom.menuChatDock) dom.menuChatDock.appendChild(dom.chatPanel);
+      dom.menuChatDock.classList.remove("hidden");
+      togglePanel(dom.chatPanel, false);
+    } else {
+      if (dom.chatPanel.parentElement !== dom.sideColumn) {
+        const battlefieldPanel = dom.sideColumn.querySelector('[data-panel="battlefield"]');
+        dom.sideColumn.insertBefore(dom.chatPanel, battlefieldPanel || dom.sideColumn.children[1] || null);
+      }
+      dom.menuChatDock.classList.add("hidden");
+    }
+  }
+
+  function updateMenuSessionUI() {
+    const live = hasLiveSession();
+    dom.connectedMenuBar.classList.toggle("hidden", !(currentScreen === "home" && live));
+    dom.hostButton.disabled = live;
+    dom.botButton.disabled = live;
+    dom.joinButton.disabled = live;
+    if (!live) return;
+    const opponent = role === "bot" ? "computer opponent" : "other player";
+    dom.connectedMenuTitle.textContent = role === "bot" ? "Bot match paused" : "Still connected";
+    dom.connectedMenuText.textContent = `Your ${opponent} and battle chat remain available.`;
+    dom.resumeBattleButton.disabled = !gameState;
+  }
+
+  function returnToMenuPreservingSession() {
+    if (!gameState) {
+      setScreen("home");
+      return;
+    }
+    hideCanvasMessage();
+    setScreen("home");
+    setConnectionStatus(role === "bot" ? "Bot match paused" : "Connected · in menu", "online");
+    addEvent("Returned to the main menu; the session remains connected.");
   }
 
   function setConnectionStatus(text, kind = "offline") {
@@ -263,7 +325,7 @@
     if (difficult) {
       const worldLabel = capitalize(worldSize);
       const article = worldLabel === "Epic" ? "an" : "a";
-      dom.visibilityWarningText.textContent = `${tankSize}% tanks on ${article} ${worldLabel} map will be tiny in the whole-map view. Use the magnifying-glass locator during play.`;
+      dom.visibilityWarningText.textContent = `${tankSize}% tanks on ${article} ${worldLabel} map will be tiny in the whole-map view. Use terrain inspection or drag directly on the battlefield to aim.`;
       if (!visibilityWarningActive) playWarningSound();
     }
     visibilityWarningActive = difficult;
@@ -293,6 +355,26 @@
 
   function capitalize(text) {
     return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function worldAngleForTeam(team, elevation) {
+    const safeElevation = clamp(Number(elevation) || 45, 5, 85);
+    return team === "red" ? 180 - safeElevation : safeElevation;
+  }
+
+  function elevationFromWorldAngle(team, angle) {
+    const value = Number(angle) || 45;
+    return clamp(team === "red" && value > 90 ? 180 - value : value, 5, 85);
+  }
+
+  function locationSettings(location, existing = {}) {
+    const preset = LOCATION_PRESETS[location] || LOCATION_PRESETS.earth;
+    return {
+      ...existing,
+      location,
+      gravity: preset.gravity,
+      windVariability: preset.wind
+    };
   }
 
   function commonPeerEvents(instance) {
@@ -399,7 +481,7 @@
       const outgoing = peer.connect(PREFIX + code, {
         reliable: true,
         serialization: "json",
-        metadata: { application: "red-blue-tanks", version: 3, request: "join" }
+        metadata: { application: "red-blue-tanks", version: 5, request: "join" }
       });
       connection = outgoing;
       wireConnection(outgoing);
@@ -427,10 +509,14 @@
       connection = null;
       pendingConnection = null;
       setConnectionStatus("Other player left", "error");
-      if (!dom.gameScreen.classList.contains("hidden")) {
+      updateMenuSessionUI();
+      placePersistentChat(currentScreen);
+      if (currentScreen === "game") {
         addEvent("The other player disconnected.", "error");
         showCanvasMessage("OPPONENT DISCONNECTED");
         updateGameControls();
+      } else if (currentScreen === "home") {
+        addChatMessage("System", "The other player disconnected.", false);
       } else {
         dom.lobbyTitle.textContent = "Connection closed";
         dom.lobbyMessage.textContent = "Return to the start screen and create or join another room.";
@@ -484,9 +570,10 @@
 
       case "state":
         if (role !== "guest") return;
-        gameState = data.state;
+        gameState = normalizeGameState(data.state);
         localInputPending = false;
         animation = null;
+        if (data.movement) startMovementAnimation(data.movement.team, data.movement.fromX, data.movement.toX, false);
         updateGameUI(true);
         if (data.message) {
           addEvent(data.message);
@@ -584,23 +671,28 @@
     const padRadius = Math.max(6.5, 9.2 * (settings.tankSize / 100));
     flattenTerrain(terrain, spawnPositions.blue, settings.worldWidth, padRadius);
     flattenTerrain(terrain, spawnPositions.red, settings.worldWidth, padRadius);
+    const ceiling = settings.location === "cave" ? generateCaveCeiling(terrain, settings, seed) : null;
 
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
     const state = {
-      version: 4,
+      version: 5,
       seed,
       settings,
       terrain: terrain.map(value => round(value, 3)),
       baseTerrain: terrain.map(value => round(value, 3)),
+      ceiling: ceiling ? ceiling.map(value => round(value, 3)) : null,
+      baseCeiling: ceiling ? ceiling.map(value => round(value, 3)) : null,
       spawnPositions: deepClone(spawnPositions),
       tanks: {
         blue: { x: round(spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: 62 },
-        red: { x: round(spawnPositions.red, 3), hits: 0, alive: true, angle: 135, power: 62 }
+        red: { x: round(spawnPositions.red, 3), hits: 0, alive: true, angle: 45, power: 62 }
       },
       scores,
       round: roundNumber,
       turn: "blue",
+      turnsRemaining: 1,
+      bonusFromDouble: false,
       movedThisTurn: false,
       wind: randomWind(settings),
       winner: null,
@@ -648,6 +740,40 @@
     addMajorTerrainFeatures(values, settings, random);
     addMinorCliffs(values, settings, random);
     return values.map(value => round(clamp(value, 5, 72), 3));
+  }
+
+  function generateCaveCeiling(terrain, settings, seed) {
+    const random = mulberry32(seed ^ 0x7f4a7c15);
+    const values = [];
+    let drift = 0;
+    const count = terrain.length;
+    for (let i = 0; i < count; i += 1) {
+      const t = i / (count - 1);
+      drift = drift * .94 + (random() - .5) * 1.2;
+      const ground = terrain[i];
+      const roof = 79
+        + Math.sin(t * Math.PI * 2 * (1.1 + random() * .05) + 1.7) * 7
+        + Math.sin(t * Math.PI * 6.2 + .4) * 4
+        + Math.sin(t * Math.PI * 17.5 + 2.1) * 1.8
+        + drift;
+      values.push(clamp(Math.max(ground + 23, roof), 58, 94));
+    }
+    smoothArray(values, 1);
+    const formationCount = 4 + Math.floor(random() * 7);
+    for (let formation = 0; formation < formationCount; formation += 1) {
+      const center = random();
+      const width = .008 + random() * .032;
+      const depth = 4 + random() * 13;
+      for (let i = 0; i < values.length; i += 1) {
+        const t = i / (values.length - 1);
+        const d = Math.abs(t - center);
+        if (d > width) continue;
+        const shape = 1 - d / width;
+        values[i] -= depth * shape * shape;
+        values[i] = Math.max(values[i], terrain[i] + 18);
+      }
+    }
+    return values;
   }
 
   function addMajorTerrainFeatures(values, settings, random) {
@@ -802,6 +928,9 @@
   function enterGame(state, preserveLogs = false) {
     gameState = normalizeGameState(state);
     animation = null;
+    movementAnimation = null;
+    doubleStrikeSelected = false;
+    updateDoubleStrikeButton();
     resetInspectionView(false);
     winnerModalDismissed = false;
     localInputPending = false;
@@ -818,11 +947,10 @@
     dom.redRoleLabel.textContent = role === "guest" ? "YOU" : role === "bot" ? "BOT" : "GUEST";
     dom.connectionBadge.textContent = role === "bot" ? "LOCAL" : "P2P";
     dom.roundControlBadge.textContent = role === "bot" ? "LOCAL" : role === "guest" ? "REQUEST" : "HOST";
-    dom.roundControlNote.textContent = role === "guest"
-      ? "Restart and regenerate requests are sent to the host."
-      : role === "bot"
-        ? "Restart or generate a fresh battlefield instantly."
-        : "The host applies battlefield resets for both players.";
+    dom.roundControlNote.textContent = role === "bot"
+      ? "World changes and map resets happen immediately against the bot."
+      : "World changes, restart and regenerate require both players to agree.";
+    dom.gameLocationSelect.value = gameState.settings.location;
     setConnectionStatus(role === "bot" ? "Computer opponent" : "Connected directly", "online");
     updateGameUI(true);
     ensureAudio();
@@ -831,10 +959,21 @@
   function normalizeGameState(state) {
     if (!state.scores) state.scores = { blue: 0, red: 0 };
     if (!Number.isFinite(state.round)) state.round = 1;
+    if (!Number.isFinite(state.turnsRemaining)) state.turnsRemaining = 1;
+    if (typeof state.bonusFromDouble !== "boolean") state.bonusFromDouble = false;
     if (!state.spawnPositions) {
       state.spawnPositions = { blue: state.tanks.blue.x, red: state.tanks.red.x };
     }
     if (!state.baseTerrain) state.baseTerrain = state.terrain.slice();
+    if (state.settings.location === "cave" && !state.ceiling) {
+      state.ceiling = generateCaveCeiling(state.terrain, state.settings, state.seed || 1);
+      state.baseCeiling = state.ceiling.slice();
+    }
+    if (!state.baseCeiling && state.ceiling) state.baseCeiling = state.ceiling.slice();
+    for (const team of ["blue", "red"]) {
+      state.tanks[team].angle = elevationFromWorldAngle(team, state.tanks[team].angle);
+    }
+    state.version = 5;
     return state;
   }
 
@@ -847,6 +986,7 @@
       gameState &&
       !gameState.winner &&
       !animation &&
+      !movementAnimation &&
       !localInputPending &&
       gameState.turn === localTeam() &&
       (role === "bot" || accepted)
@@ -857,9 +997,9 @@
     if (!gameState) return;
     const { settings, tanks } = gameState;
     const turnName = TEAM_NAMES[gameState.turn].toUpperCase();
-    dom.turnLabel.textContent = gameState.winner ? `${TEAM_NAMES[gameState.winner].toUpperCase()} WINS` : `${turnName} TURN`;
+    const turnSuffix = gameState.turnsRemaining > 1 ? ` · ${gameState.turnsRemaining} SHOTS` : "";
+    dom.turnLabel.textContent = gameState.winner ? `${TEAM_NAMES[gameState.winner].toUpperCase()} WINS` : `${turnName} TURN${turnSuffix}`;
     dom.windLabel.textContent = formatWind(gameState.wind);
-    dom.worldLabel.textContent = `${LOCATION_PRESETS[settings.location].label.toUpperCase()} · GRAVITY ${settings.gravity.toFixed(2)}`;
     dom.telemetryWind.textContent = signed(gameState.wind);
     dom.telemetryGravity.textContent = settings.gravity.toFixed(2);
     dom.telemetryMove.textContent = moveStep().toFixed(1);
@@ -919,14 +1059,17 @@
     dom.angleInput.disabled = !enabled;
     dom.powerInput.disabled = !enabled;
     dom.fireButton.disabled = !enabled;
-    dom.locatorButton.disabled = Boolean(animation);
-    const roundControlBusy = Boolean(animation || pendingActionRequest || localActionRequest);
+    dom.doubleStrikeButton.disabled = !enabled;
+    dom.locatorButton.disabled = Boolean(animation || movementAnimation);
+    const roundControlBusy = Boolean(animation || movementAnimation || pendingActionRequest || localActionRequest);
     dom.restartRoundButton.disabled = roundControlBusy;
     dom.regenerateMapButton.disabled = roundControlBusy;
+    dom.changeWorldButton.disabled = roundControlBusy || dom.gameLocationSelect.value === gameState.settings.location;
 
     if (!gameState) return;
     if (gameState.winner) dom.moveStatus.textContent = "Battle complete";
     else if (animation) dom.moveStatus.textContent = "Projectile in flight";
+    else if (movementAnimation) dom.moveStatus.textContent = "Tank moving";
     else if (localInputPending) dom.moveStatus.textContent = "Waiting for host";
     else if (gameState.turn !== localTeam()) dom.moveStatus.textContent = "Opponent's turn";
     else if (gameState.movedThisTurn) dom.moveStatus.textContent = "Movement used";
@@ -967,13 +1110,15 @@
     }
 
     // Tanks may climb steep banks. Their body rotates to match the local surface.
+    const fromX = tank.x;
     tank.x = round(candidate, 3);
     gameState.movedThisTurn = true;
     localInputPending = false;
     const message = `${TEAM_NAMES[team]} moved ${direction < 0 ? "left" : "right"}.`;
+    startMovementAnimation(team, fromX, tank.x, true);
     playMoveSound();
     addEvent(message);
-    broadcastState(message);
+    broadcastState(message, { team, fromX, toX: tank.x });
     updateGameUI(true);
     return true;
   }
@@ -990,31 +1135,34 @@
     const angle = Number(dom.angleInput.value);
     const power = Number(dom.powerInput.value);
     const team = localTeam();
+    const doubleStrike = doubleStrikeSelected;
+    doubleStrikeSelected = false;
+    updateDoubleStrikeButton();
 
     if (role === "guest") {
       localInputPending = true;
-      connection.send({ type: "input", action: "fire", angle, power });
+      connection.send({ type: "input", action: "fire", angle, power, doubleStrike });
       updateGameControls();
     } else {
-      authoritativeFire(team, angle, power);
+      authoritativeFire(team, angle, power, doubleStrike);
     }
   }
 
   function handleGuestInput(data) {
-    if (!gameState || gameState.turn !== "red" || animation || gameState.winner) {
+    if (!gameState || gameState.turn !== "red" || animation || movementAnimation || gameState.winner) {
       rejectGuestInput("Input ignored because it is not Red's active turn.");
       return;
     }
     if (data.action === "move") {
       authoritativeMove("red", Number(data.direction));
     } else if (data.action === "fire") {
-      authoritativeFire("red", Number(data.angle), Number(data.power));
+      authoritativeFire("red", Number(data.angle), Number(data.power), Boolean(data.doubleStrike));
     }
   }
 
-  function authoritativeFire(team, angle, power) {
-    if (!gameState || animation || gameState.winner || gameState.turn !== team) return;
-    const safeAngle = clamp(Number.isFinite(angle) ? angle : 45, 5, 175);
+  function authoritativeFire(team, angle, power, doubleStrike = false) {
+    if (!gameState || animation || movementAnimation || gameState.winner || gameState.turn !== team) return;
+    const safeAngle = clamp(Number.isFinite(angle) ? angle : 45, 5, 85);
     const safePower = clamp(Number.isFinite(power) ? power : 60, 18, 100);
     gameState.tanks[team].angle = round(safeAngle, 1);
     gameState.tanks[team].power = round(safePower, 1);
@@ -1022,22 +1170,36 @@
     const result = simulateShot(gameState, team, safeAngle, safePower, true);
     const resultingState = deepClone(gameState);
     resultingState.shotNumber += 1;
+    const blastRadius = shotBlastRadius(resultingState, doubleStrike);
+
+    const hitTeams = result.impact && result.impact.type !== "out"
+      ? blastHitTeams(gameState, result.impact, blastRadius)
+      : [];
+    if (result.hitTeam && !hitTeams.includes(result.hitTeam)) hitTeams.push(result.hitTeam);
 
     if (result.impact && result.impact.type !== "out") {
-      applyCrater(resultingState, result.impact.x, result.impact.y, craterRadius(resultingState));
+      if (result.impact.type === "ceiling") applyCeilingCrater(resultingState, result.impact.x, blastRadius);
+      else applyCrater(resultingState, result.impact.x, result.impact.y, blastRadius);
     }
 
-    if (result.hitTeam) {
-      resultingState.tanks[result.hitTeam].hits += 1;
-      if (resultingState.tanks[result.hitTeam].hits >= resultingState.settings.hitsToDestroy) {
-        resultingState.tanks[result.hitTeam].alive = false;
-        resultingState.winner = OTHER_TEAM[result.hitTeam];
-        resultingState.scores[resultingState.winner] += 1;
+    for (const hitTeam of hitTeams) {
+      resultingState.tanks[hitTeam].hits += 1;
+      if (resultingState.tanks[hitTeam].hits >= resultingState.settings.hitsToDestroy) {
+        resultingState.tanks[hitTeam].alive = false;
       }
     }
 
+    const aliveTeams = ["blue", "red"].filter(candidate => resultingState.tanks[candidate].alive);
+    if (aliveTeams.length === 1) {
+      resultingState.winner = aliveTeams[0];
+      resultingState.scores[resultingState.winner] += 1;
+    } else if (aliveTeams.length === 0) {
+      resultingState.winner = OTHER_TEAM[team];
+      resultingState.scores[resultingState.winner] += 1;
+    }
+
     if (!resultingState.winner) {
-      resultingState.turn = OTHER_TEAM[team];
+      advanceTurnAfterShot(resultingState, team, doubleStrike);
       resultingState.movedThisTurn = false;
       resultingState.wind = randomWind(resultingState.settings);
     }
@@ -1046,9 +1208,12 @@
       shooter: team,
       angle: round(safeAngle, 1),
       power: round(safePower, 1),
+      doubleStrike,
+      blastRadius: round(blastRadius, 3),
       trajectory: result.trajectory,
       impact: result.impact,
-      hitTeam: result.hitTeam,
+      hitTeam: hitTeams[0] || null,
+      hitTeams,
       resultingState
     };
 
@@ -1056,10 +1221,43 @@
     beginShotAnimation(packet);
   }
 
+  function advanceTurnAfterShot(state, shooter, doubleStrike) {
+    const opponent = OTHER_TEAM[shooter];
+    if (doubleStrike && state.bonusFromDouble) {
+      state.turn = opponent;
+      state.turnsRemaining = 1;
+      state.bonusFromDouble = false;
+      return;
+    }
+    if (!doubleStrike && state.turnsRemaining > 1) {
+      state.turn = shooter;
+      state.turnsRemaining -= 1;
+      return;
+    }
+    state.turn = opponent;
+    state.turnsRemaining = doubleStrike ? 2 : 1;
+    state.bonusFromDouble = doubleStrike;
+  }
+
+  function shotBlastRadius(state, doubleStrike = false) {
+    return craterRadius(state) * (doubleStrike ? 2 : 1);
+  }
+
+  function blastHitTeams(state, impact, radius) {
+    const hitTeams = [];
+    for (const team of ["blue", "red"]) {
+      if (!state.tanks[team].alive) continue;
+      const center = tankCenter(state, team);
+      if (Math.hypot(impact.x - center.x, impact.y - center.y) <= radius + tankCollisionRadius(state)) {
+        hitTeams.push(team);
+      }
+    }
+    return hitTeams;
+  }
+
   function simulateShot(state, team, angle, power, recordTrajectory) {
-    const tank = state.tanks[team];
     const origin = muzzlePosition(state, team, angle);
-    const radians = angle * Math.PI / 180;
+    const radians = worldAngleForTeam(team, angle) * Math.PI / 180;
     const speed = power * 0.60;
     let x = origin.x;
     let y = origin.y;
@@ -1077,7 +1275,7 @@
 
       if (recordTrajectory && step % 2 === 0) trajectory.push({ x: round(x), y: round(y) });
 
-      if (x < 0 || x > state.settings.worldWidth || y < -5) {
+      if (x < 0 || x > state.settings.worldWidth || y < -5 || y > WORLD_HEIGHT + 5) {
         if (recordTrajectory) trajectory.push({ x: round(x), y: round(y) });
         return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null };
       }
@@ -1107,6 +1305,18 @@
           hitTeam: null
         };
       }
+
+      if (state.ceiling) {
+        const roof = ceilingAt(x, state);
+        if (step > 4 && y >= roof) {
+          if (recordTrajectory) trajectory.push({ x: round(x), y: round(roof) });
+          return {
+            trajectory,
+            impact: { x: round(x), y: round(roof), type: "ceiling" },
+            hitTeam: null
+          };
+        }
+      }
     }
 
     return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null };
@@ -1114,7 +1324,7 @@
 
   function muzzlePosition(state, team, angle = state.tanks[team].angle) {
     const center = tankCenter(state, team);
-    const radians = angle * Math.PI / 180;
+    const radians = worldAngleForTeam(team, angle) * Math.PI / 180;
     const length = tankWorldWidth(state) * 0.94;
     return {
       x: center.x + Math.cos(radians) * length,
@@ -1160,6 +1370,16 @@
     return a + (b - a) * fraction;
   }
 
+  function ceilingAt(x, state = gameState) {
+    if (!state?.ceiling) return WORLD_HEIGHT + 20;
+    const position = clamp(x / state.settings.worldWidth, 0, 1) * (state.ceiling.length - 1);
+    const index = Math.floor(position);
+    const fraction = position - index;
+    const a = state.ceiling[index];
+    const b = state.ceiling[Math.min(index + 1, state.ceiling.length - 1)];
+    return a + (b - a) * fraction;
+  }
+
   function terrainSlopeAt(x, state = gameState) {
     const delta = state.settings.worldWidth / state.terrain.length * 2;
     return (terrainAt(x + delta, state) - terrainAt(x - delta, state)) / (delta * 2);
@@ -1182,6 +1402,23 @@
     smoothLocalTerrain(state.terrain, Math.round(centerIndex), radiusIndex + 2);
   }
 
+  function applyCeilingCrater(state, impactX, radius) {
+    if (!state.ceiling) return;
+    const centerIndex = (impactX / state.settings.worldWidth) * (state.ceiling.length - 1);
+    const radiusIndex = Math.ceil((radius / state.settings.worldWidth) * state.ceiling.length);
+    for (let offset = -radiusIndex; offset <= radiusIndex; offset += 1) {
+      const index = Math.round(centerIndex + offset);
+      if (index < 0 || index >= state.ceiling.length) continue;
+      const worldX = index / (state.ceiling.length - 1) * state.settings.worldWidth;
+      const distance = Math.abs(worldX - impactX);
+      if (distance > radius) continue;
+      const normal = distance / radius;
+      const depth = radius * .62 * (1 - normal * normal);
+      state.ceiling[index] = round(clamp(state.ceiling[index] + depth, state.terrain[index] + 15, WORLD_HEIGHT - 2), 3);
+    }
+    smoothLocalTerrain(state.ceiling, Math.round(centerIndex), radiusIndex + 2);
+  }
+
   function smoothLocalTerrain(values, center, radius) {
     const copy = values.slice();
     for (let i = Math.max(1, center - radius); i <= Math.min(values.length - 2, center + radius); i += 1) {
@@ -1201,7 +1438,7 @@
       phase: "travel"
     };
     playFireSound();
-    addEvent(`${TEAM_NAMES[packet.shooter]} fired at ${packet.angle}° with power ${Math.round(packet.power)}.`);
+    addEvent(`${TEAM_NAMES[packet.shooter]} fired${packet.doubleStrike ? " a DOUBLE STRIKE" : ""} at ${packet.angle}° with power ${Math.round(packet.power)}.`);
     updateGameControls();
   }
 
@@ -1211,11 +1448,14 @@
     gameState = packet.resultingState;
     animation = null;
 
-    if (packet.hitTeam) {
-      addEvent(`DIRECT HIT on ${TEAM_NAMES[packet.hitTeam]}!`, "hit");
+    const hitTeams = Array.isArray(packet.hitTeams) ? packet.hitTeams : (packet.hitTeam ? [packet.hitTeam] : []);
+    if (hitTeams.length) {
+      hitTeams.forEach(team => addEvent(`BLAST HIT on ${TEAM_NAMES[team]}!`, "hit"));
       playHitSound();
     } else if (packet.impact && packet.impact.type === "terrain") {
-      addEvent("Terrain impact.");
+      addEvent("Ground impact.");
+    } else if (packet.impact && packet.impact.type === "ceiling") {
+      addEvent("Cave roof impact.");
     } else {
       addEvent("Shot left the battlefield.");
       playMissSound();
@@ -1231,10 +1471,30 @@
     updateGameUI(true);
   }
 
-  function broadcastState(message = "") {
+  function broadcastState(message = "", movement = null) {
     if (role === "host" && connection && connection.open) {
-      connection.send({ type: "state", state: gameState, message });
+      connection.send({ type: "state", state: gameState, message, movement });
     }
+  }
+
+  function startMovementAnimation(team, fromX, toX, local = false) {
+    if (!gameState || !Number.isFinite(fromX) || !Number.isFinite(toX)) return;
+    movementAnimation = {
+      team,
+      fromX,
+      toX,
+      start: performance.now(),
+      duration: clamp(360 + Math.abs(toX - fromX) * 38, 420, 850),
+      local
+    };
+    updateGameControls();
+  }
+
+  function displayTankX(team, now = performance.now()) {
+    if (!movementAnimation || movementAnimation.team !== team) return gameState.tanks[team].x;
+    const progress = clamp((now - movementAnimation.start) / movementAnimation.duration, 0, 1);
+    const eased = progress < .5 ? 2 * progress * progress : 1 - ((-2 * progress + 2) ** 2) / 2;
+    return movementAnimation.fromX + (movementAnimation.toX - movementAnimation.fromX) * eased;
   }
 
   function scheduleBotTurn() {
@@ -1254,17 +1514,17 @@
         const aim = calculateBotAim();
         dom.angleInput.value = aim.angle;
         dom.powerInput.value = aim.power;
-        authoritativeFire("red", aim.angle, aim.power);
+        authoritativeFire("red", aim.angle, aim.power, Math.random() < .18);
       }, 650);
     }, 700);
   }
 
   function calculateBotAim() {
-    let best = { angle: 135, power: 60, score: Infinity };
+    let best = { angle: 45, power: 60, score: Infinity };
     const target = tankCenter(gameState, "blue");
     const shooter = "red";
 
-    for (let angle = 98; angle <= 175; angle += 3) {
+    for (let angle = 5; angle <= 85; angle += 3) {
       for (let power = 24; power <= 100; power += 4) {
         const score = quickShotScore(shooter, angle, power, target);
         if (score < best.score) best = { angle, power, score };
@@ -1275,14 +1535,14 @@
     const errorAngle = (Math.random() - 0.5) * 2.2;
     const errorPower = (Math.random() - 0.5) * 3.6;
     return {
-      angle: round(clamp(best.angle + errorAngle, 95, 175), 1),
+      angle: round(clamp(best.angle + errorAngle, 5, 85), 1),
       power: round(clamp(best.power + errorPower, 20, 100), 1)
     };
   }
 
   function quickShotScore(team, angle, power, target) {
     const origin = muzzlePosition(gameState, team, angle);
-    const radians = angle * Math.PI / 180;
+    const radians = worldAngleForTeam(team, angle) * Math.PI / 180;
     const speed = power * 0.60;
     let x = origin.x;
     let y = origin.y;
@@ -1301,6 +1561,7 @@
       if (distance <= tankCollisionRadius()) return 0;
       if (x < 0 || x > gameState.settings.worldWidth || y < -4) break;
       if (step > 3 && y <= terrainAt(x, gameState)) break;
+      if (gameState.ceiling && step > 3 && y >= ceilingAt(x, gameState)) break;
     }
     return bestDistance;
   }
@@ -1363,62 +1624,66 @@
     hideCanvasMessage();
   }
 
-  function actionLabel(action) {
+  function actionLabel(action, payload = {}) {
     if (action === "restart") return "restart this battlefield";
     if (action === "regenerate") return "generate a new battlefield";
+    if (action === "change-world") return `change the world to ${LOCATION_PRESETS[payload.location]?.label || "another world"}`;
     return "play another round";
   }
 
-  function requestRoundAction(action) {
-    if (!gameState || animation || pendingActionRequest || localActionRequest) return;
+  function requestRoundAction(action, payload = {}) {
+    if (!gameState || animation || movementAnimation || pendingActionRequest || localActionRequest) return;
 
     if (role === "bot") {
-      executeRoundAction(action);
-      return;
-    }
-
-    if (role === "host" && action !== "replay") {
-      executeRoundAction(action);
+      executeRoundAction(action, payload);
       return;
     }
 
     if (!connection || !connection.open || !accepted) return;
-    localActionRequest = action;
-    connection.send({ type: "action-request", action, sender: localTeam() });
+    localActionRequest = { action, payload };
+    connection.send({ type: "action-request", action, payload, sender: localTeam() });
     showCanvasMessage(
       `${action === "replay" ? "REPLAY" : "BATTLEFIELD"} REQUESTED`,
       `Waiting for ${TEAM_NAMES[OTHER_TEAM[localTeam()]]} to accept.`,
       "waiting"
     );
-    addEvent(`You requested to ${actionLabel(action)}.`);
+    addEvent(`You requested to ${actionLabel(action, payload)}.`);
     updateGameControls();
   }
 
+  function requestWorldChange() {
+    if (!gameState) return;
+    const location = dom.gameLocationSelect.value;
+    if (location === gameState.settings.location) return;
+    requestRoundAction("change-world", { location });
+  }
+
   function receiveActionRequest(data) {
-    if (!gameState || !accepted || !["restart", "regenerate", "replay"].includes(data.action)) return;
+    if (!gameState || !accepted || !["restart", "regenerate", "replay", "change-world"].includes(data.action)) return;
     if (pendingActionRequest || localActionRequest) {
       connection?.send({ type: "action-response", action: data.action, accepted: false, reason: "busy" });
       return;
     }
-    pendingActionRequest = { action: data.action, sender: data.sender };
+    pendingActionRequest = { action: data.action, payload: data.payload || {}, sender: data.sender };
     const requester = TEAM_NAMES[data.sender] || "Opponent";
+    if (currentScreen !== "game") setScreen("game");
     showCanvasMessage(
       `${requester.toUpperCase()} REQUESTS A CHANGE`,
-      `${requester} wants to ${actionLabel(data.action)}.`,
+      `${requester} wants to ${actionLabel(data.action, data.payload || {})}.`,
       "request"
     );
-    addEvent(`${requester} requested to ${actionLabel(data.action)}.`);
+    addEvent(`${requester} requested to ${actionLabel(data.action, data.payload || {})}.`);
     updateGameControls();
   }
 
   function acceptActionRequest() {
     if (!pendingActionRequest) return;
-    const { action } = pendingActionRequest;
+    const { action, payload } = pendingActionRequest;
     pendingActionRequest = null;
     connection?.send({ type: "action-response", action, accepted: true });
 
     if (role === "host") {
-      executeRoundAction(action);
+      executeRoundAction(action, payload);
     } else {
       showCanvasMessage("REQUEST ACCEPTED", "The host is preparing the battlefield.", "waiting");
     }
@@ -1430,17 +1695,19 @@
     pendingActionRequest = null;
     connection?.send({ type: "action-response", action, accepted: false });
     addEvent("Replay or battlefield request declined.");
+    dom.gameLocationSelect.value = gameState.settings.location;
     if (gameState?.winner) updateGameUI(false);
     else hideCanvasMessage();
     updateGameControls();
   }
 
   function receiveActionResponse(data) {
-    if (!localActionRequest || data.action !== localActionRequest) return;
-    const action = localActionRequest;
+    if (!localActionRequest || data.action !== localActionRequest.action) return;
+    const request = localActionRequest;
     if (!data.accepted) {
       localActionRequest = null;
       addEvent("Your request was declined.", "error");
+      dom.gameLocationSelect.value = gameState.settings.location;
       if (gameState?.winner) updateGameUI(false);
       else hideCanvasMessage();
       updateGameControls();
@@ -1450,13 +1717,13 @@
     addEvent("Your request was accepted.");
     if (role === "host") {
       localActionRequest = null;
-      executeRoundAction(action);
+      executeRoundAction(request.action, request.payload);
     } else {
       showCanvasMessage("REQUEST ACCEPTED", "The host is preparing the battlefield.", "waiting");
     }
   }
 
-  function executeRoundAction(action) {
+  function executeRoundAction(action, payload = {}) {
     if (!gameState || (role !== "host" && role !== "bot")) return;
     clearTimeout(botTimer);
     botTimer = null;
@@ -1468,6 +1735,11 @@
     if (action === "restart") {
       state = createRestartedState(gameState, nextRound);
       message = `Round ${nextRound}: battlefield restarted.`;
+    } else if (action === "change-world") {
+      const location = LOCATION_PRESETS[payload.location] ? payload.location : gameState.settings.location;
+      const settings = locationSettings(location, gameState.settings);
+      state = createGameState(settings, { scores, round: nextRound });
+      message = `Round ${nextRound}: world changed to ${LOCATION_PRESETS[location].label}.`;
     } else {
       state = createGameState(gameState.settings, { scores, round: nextRound });
       message = `Round ${nextRound}: a new battlefield was generated.`;
@@ -1486,12 +1758,15 @@
   function createRestartedState(previous, roundNumber) {
     const state = deepClone(previous);
     state.terrain = state.baseTerrain.slice();
+    state.ceiling = state.baseCeiling ? state.baseCeiling.slice() : null;
     state.tanks = {
       blue: { x: round(state.spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: 62 },
-      red: { x: round(state.spawnPositions.red, 3), hits: 0, alive: true, angle: 135, power: 62 }
+      red: { x: round(state.spawnPositions.red, 3), hits: 0, alive: true, angle: 45, power: 62 }
     };
     state.round = roundNumber;
     state.turn = "blue";
+    state.turnsRemaining = 1;
+    state.bonusFromDouble = false;
     state.movedThisTurn = false;
     state.wind = randomWind(state.settings);
     state.winner = null;
@@ -1503,12 +1778,15 @@
     clearTimeout(botTimer);
     botTimer = null;
     animation = null;
+    movementAnimation = null;
     gameState = null;
     localInputPending = false;
     pendingActionRequest = null;
     localActionRequest = null;
     acceptRequested = false;
     winnerModalDismissed = false;
+    doubleStrikeSelected = false;
+    updateDoubleStrikeButton();
     resetInspectionView(false);
     dom.homeNotice.textContent = "";
     dom.chatLog.replaceChildren();
@@ -1536,10 +1814,13 @@
     acceptRequested = false;
     gameState = null;
     animation = null;
+    movementAnimation = null;
     localInputPending = false;
     pendingActionRequest = null;
     localActionRequest = null;
     winnerModalDismissed = false;
+    doubleStrikeSelected = false;
+    updateDoubleStrikeButton();
     resetInspectionView(false);
     dom.lobbyLog.replaceChildren();
     dom.chatLog.replaceChildren();
@@ -1547,6 +1828,9 @@
     dom.roomCodeWrap.classList.add("hidden");
     dom.incomingRequest.classList.add("hidden");
     dom.joinCode.value = "";
+    dom.hostButton.disabled = false;
+    dom.botButton.disabled = false;
+    dom.joinButton.disabled = false;
     hideCanvasMessage();
     dom.acceptButton.disabled = false;
     dom.acceptButton.textContent = "Accept";
@@ -1669,8 +1953,35 @@
     clampInspectionCenter();
   }
 
+  function updateAimFromPointer(clientX, clientY) {
+    if (!gameState || !canLocalAct()) return;
+    const team = localTeam();
+    const point = canvasToWorld(clientX, clientY);
+    const center = tankCenter(gameState, team);
+    const forward = team === "blue" ? point.x - center.x : center.x - point.x;
+    const rise = point.y - center.y;
+    const elevation = clamp(Math.atan2(rise, Math.max(.15, forward)) * 180 / Math.PI, 5, 85);
+    const distance = Math.hypot(Math.max(0, forward), rise);
+    const power = clamp(18 + distance / Math.max(1, gameState.settings.worldWidth * .43) * 82, 18, 100);
+    dom.angleInput.value = String(Math.round(elevation));
+    dom.powerInput.value = String(Math.round(power));
+    gameState.tanks[team].angle = round(elevation, 1);
+    gameState.tanks[team].power = round(power, 1);
+    updateAimOutputs();
+  }
+
   function handleCanvasPointerDown(event) {
-    if (!inspectionCamera.active || !gameState) return;
+    if (!gameState) return;
+    if (!inspectionCamera.active && canLocalAct()) {
+      dom.canvas.setPointerCapture?.(event.pointerId);
+      aimDrag.active = true;
+      aimDrag.pointerId = event.pointerId;
+      dom.canvasFrame.classList.add("aim-drag-active");
+      updateAimFromPointer(event.clientX, event.clientY);
+      event.preventDefault();
+      return;
+    }
+    if (!inspectionCamera.active) return;
     dom.canvas.setPointerCapture?.(event.pointerId);
     inspectionCamera.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     inspectionCamera.dragging = true;
@@ -1686,6 +1997,11 @@
   }
 
   function handleCanvasPointerMove(event) {
+    if (aimDrag.active && aimDrag.pointerId === event.pointerId) {
+      updateAimFromPointer(event.clientX, event.clientY);
+      event.preventDefault();
+      return;
+    }
     if (!inspectionCamera.active || !inspectionCamera.pointers.has(event.pointerId) || !gameState) return;
     const previous = inspectionCamera.pointers.get(event.pointerId);
     inspectionCamera.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -1713,10 +2029,16 @@
   }
 
   function handleCanvasPointerUp(event) {
+    if (aimDrag.pointerId === event.pointerId) {
+      aimDrag.active = false;
+      aimDrag.pointerId = null;
+      dom.canvasFrame.classList.remove("aim-drag-active");
+    }
     inspectionCamera.pointers.delete(event.pointerId);
     inspectionCamera.dragging = inspectionCamera.pointers.size > 0;
     if (inspectionCamera.pointers.size < 2) inspectionCamera.pinchDistance = 0;
   }
+
 
   function handleCanvasWheel(event) {
     if (!inspectionCamera.active || !gameState) return;
@@ -1889,6 +2211,11 @@
     resizeCanvasToDisplaySize();
     const elapsed = Math.min(100, now - lastFrameTime);
     lastFrameTime = now;
+    if (movementAnimation && now - movementAnimation.start >= movementAnimation.duration) {
+      movementAnimation = null;
+      updateGameControls();
+      if (role === "bot" && gameState?.turn === "red") scheduleBotTurn();
+    }
     if (gameState) drawGame(now, elapsed);
     else drawIdleCanvas(now);
     requestAnimationFrame(renderFrame);
@@ -1903,6 +2230,7 @@
     drawSky(now);
     drawDistantLandscape();
     drawTerrain();
+    if (gameState.ceiling) drawCaveCeiling();
     drawTankPads();
     drawAimGuide();
     drawTank("blue", now);
@@ -1920,7 +2248,8 @@
       earth: ["#263746", "#65727a", "#a29d8e"],
       mars: ["#4b2925", "#8a5545", "#b28366"],
       moon: ["#020407", "#0c1118", "#252a2e"],
-      space: ["#020307", "#090c16", "#151321"]
+      space: ["#020307", "#090c16", "#151321"],
+      cave: ["#070807", "#151714", "#24241f"]
     };
     const colors = palettes[location];
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
@@ -1934,6 +2263,7 @@
     if (location === "mars") drawMarsSky();
     if (location === "moon") drawMoonSky();
     if (location === "space") drawSpaceSky(now);
+    if (location === "cave") drawCaveAtmosphere();
 
     // Fine atmospheric grain prevents the sky looking like a flat cartoon wash.
     const random = mulberry32(gameState.seed ^ 0xa5a5a5a5);
@@ -2048,6 +2378,82 @@
     ctx.restore();
   }
 
+  function drawCaveAtmosphere() {
+    const width = dom.canvas.width;
+    const height = dom.canvas.height;
+    const random = mulberry32(gameState.seed ^ 0x4cf5ad43);
+    ctx.save();
+    const glow = ctx.createRadialGradient(width * .5, height * .56, 10, width * .5, height * .56, height * .72);
+    glow.addColorStop(0, "rgba(128,118,82,.12)");
+    glow.addColorStop(.45, "rgba(66,62,47,.06)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalAlpha = .13;
+    for (let i = 0; i < 90; i += 1) {
+      const x = random() * width;
+      const y = height * (.2 + random() * .62);
+      ctx.fillStyle = random() > .65 ? "#b8a978" : "#5b5849";
+      ctx.fillRect(x, y, .5 + random() * 1.5, .5 + random() * 1.5);
+    }
+    ctx.restore();
+  }
+
+  function drawCaveCeiling() {
+    if (!gameState.ceiling) return;
+    const metrics = canvasMetrics();
+    const random = mulberry32(gameState.seed ^ 0x9d4b3a21);
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    gameState.ceiling.forEach((heightValue, index) => {
+      const worldX = index / (gameState.ceiling.length - 1) * gameState.settings.worldWidth;
+      const point = worldToCanvas(worldX, heightValue);
+      ctx.lineTo(point.x, point.y);
+    });
+    ctx.lineTo(metrics.width, 0);
+    ctx.closePath();
+    const rock = ctx.createLinearGradient(0, 0, 0, metrics.height * .45);
+    rock.addColorStop(0, "#11120f");
+    rock.addColorStop(.5, "#29291f");
+    rock.addColorStop(1, "#56513d");
+    ctx.fillStyle = rock;
+    ctx.fill();
+    ctx.clip();
+
+    ctx.globalAlpha = .18;
+    for (let i = 0; i < 240; i += 1) {
+      const x = random() * metrics.width;
+      const y = random() * metrics.height * .43;
+      const size = .5 + random() * 3.4;
+      ctx.fillStyle = random() > .5 ? "#080906" : "#9b8f69";
+      ctx.beginPath();
+      ctx.ellipse(x, y, size * (1 + random()), size, random() * Math.PI, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = .22;
+    ctx.strokeStyle = "#060705";
+    for (let i = 0; i < 48; i += 1) {
+      const x = random() * metrics.width;
+      const y = random() * metrics.height * .28;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (random() - .5) * 22, y + 10 + random() * 35);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.beginPath();
+    gameState.ceiling.forEach((heightValue, index) => {
+      const worldX = index / (gameState.ceiling.length - 1) * gameState.settings.worldWidth;
+      const point = worldToCanvas(worldX, heightValue);
+      if (index === 0) ctx.moveTo(point.x, point.y); else ctx.lineTo(point.x, point.y);
+    });
+    ctx.strokeStyle = "#918765";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   function drawStars(count, color, maxRadius) {
     const random = mulberry32(gameState.seed ^ 0x9e3779b9);
     ctx.fillStyle = color;
@@ -2068,13 +2474,13 @@
     const width = dom.canvas.width;
     const height = dom.canvas.height;
     const random = mulberry32(gameState.seed ^ 0x6d2b79f5);
-    const layers = location === "earth" ? 3 : 2;
+    const layers = location === "earth" ? 3 : location === "cave" ? 1 : 2;
     ctx.save();
     for (let layer = 0; layer < layers; layer += 1) {
       const baseline = height * (.65 + layer * .07);
       const amplitude = height * (.07 + layer * .025);
       ctx.globalAlpha = .16 - layer * .035;
-      ctx.fillStyle = location === "earth" ? ["#202b2d", "#293337", "#3a4140"][layer] : location === "mars" ? ["#432a26", "#5a3930"][layer] : ["#292d31", "#3b3d40"][layer];
+      ctx.fillStyle = location === "earth" ? ["#202b2d", "#293337", "#3a4140"][layer] : location === "mars" ? ["#432a26", "#5a3930"][layer] : location === "cave" ? "#141612" : ["#292d31", "#3b3d40"][layer];
       ctx.beginPath();
       ctx.moveTo(0, height);
       ctx.lineTo(0, baseline);
@@ -2107,7 +2513,8 @@
       earth: ["#50513c", "#313425", "#171a14"],
       mars: ["#784c37", "#4b2f27", "#241918"],
       moon: ["#777a76", "#424542", "#202322"],
-      space: ["#5f565c", "#393139", "#1b171d"]
+      space: ["#5f565c", "#393139", "#1b171d"],
+      cave: ["#5c5846", "#353329", "#171814"]
     }[location];
 
     const gradient = ctx.createLinearGradient(0, metrics.height * .38, 0, metrics.height);
@@ -2183,7 +2590,7 @@
 
     terrainSurfacePath();
     ctx.lineWidth = Math.max(1.2, Math.min(3, metrics.sy * .24));
-    ctx.strokeStyle = location === "earth" ? "#74745b" : location === "mars" ? "#9a6447" : "#999a94";
+    ctx.strokeStyle = location === "earth" ? "#74745b" : location === "mars" ? "#9a6447" : location === "cave" ? "#817a5d" : "#999a94";
     ctx.stroke();
     terrainSurfacePath();
     ctx.lineWidth = 1;
@@ -2227,24 +2634,33 @@
 
   function drawTank(team, now) {
     const tank = gameState.tanks[team];
-    const ground = terrainAt(tank.x);
-    const groundPoint = worldToCanvas(tank.x, ground);
+    const displayX = displayTankX(team, now);
+    const ground = terrainAt(displayX);
+    const groundPoint = worldToCanvas(displayX, ground);
     const metrics = canvasMetrics();
     const bodyWidth = Math.max(0.45, tankWorldWidth() * metrics.sx);
     const bodyHeight = Math.max(0.28, tankWorldHeight() * metrics.sy);
-    const slope = terrainSlopeAt(tank.x);
+    const slope = terrainSlopeAt(displayX);
     const bodyAngle = clamp(-Math.atan(slope * metrics.sy / metrics.sx), -1.08, 1.08);
-    const accent = team === "blue" ? "#486f86" : "#7d4743";
-    const accentLight = team === "blue" ? "#7192a3" : "#a0665f";
+    const accent = team === "blue" ? "#176fa8" : "#a72d31";
+    const accentLight = team === "blue" ? "#55a9d8" : "#e05a5d";
+    const accentDark = team === "blue" ? "#123b55" : "#561b1d";
     const steel = "#434840";
     const steelLight = "#666b61";
     const steelDark = "#1e221f";
     const detail = bodyWidth >= 9 && bodyHeight >= 4;
     const fineDetail = bodyWidth >= 18 && bodyHeight >= 8;
+    const movementProgress = movementAnimation && movementAnimation.team === team
+      ? clamp((now - movementAnimation.start) / movementAnimation.duration, 0, 1)
+      : 0;
+    const rollDirection = movementAnimation && movementAnimation.team === team
+      ? Math.sign(movementAnimation.toX - movementAnimation.fromX)
+      : 0;
+    const rollPhase = movementProgress * Math.PI * 8 * rollDirection;
 
-    const center = tankCenter(gameState, team);
+    const center = { x: displayX, y: terrainAt(displayX) + tankWorldHeight() * .80 };
     const turretPoint = worldToCanvas(center.x, center.y);
-    const barrelAngle = -(tank.angle * Math.PI / 180);
+    const barrelAngle = -(worldAngleForTeam(team, tank.angle) * Math.PI / 180);
     const barrelLength = bodyWidth * 1.08;
     const barrelThickness = Math.max(.55, bodyHeight * .13);
 
@@ -2306,6 +2722,18 @@
         ctx.beginPath();
         ctx.arc(wheelX, wheelY, wheelRadius * .38, 0, Math.PI * 2);
         ctx.fill();
+        ctx.save();
+        ctx.translate(wheelX, wheelY);
+        ctx.rotate(rollPhase + i * .35);
+        ctx.strokeStyle = "rgba(206,210,196,.42)";
+        ctx.lineWidth = Math.max(.35, bodyHeight * .022);
+        ctx.beginPath();
+        ctx.moveTo(-wheelRadius * .72, 0);
+        ctx.lineTo(wheelRadius * .72, 0);
+        ctx.moveTo(0, -wheelRadius * .72);
+        ctx.lineTo(0, wheelRadius * .72);
+        ctx.stroke();
+        ctx.restore();
       }
       ctx.strokeStyle = "rgba(180,184,170,.23)";
       ctx.lineWidth = Math.max(.35, bodyHeight * .025);
@@ -2320,8 +2748,9 @@
 
     // Low, sloped hull with muted team identification panel.
     const hull = ctx.createLinearGradient(0, -bodyHeight * .42, 0, bodyHeight * .2);
-    hull.addColorStop(0, steelLight);
-    hull.addColorStop(.42, steel);
+    hull.addColorStop(0, accentLight);
+    hull.addColorStop(.34, accent);
+    hull.addColorStop(.72, accentDark);
     hull.addColorStop(1, steelDark);
     ctx.fillStyle = hull;
     ctx.beginPath();
@@ -2344,8 +2773,9 @@
     ctx.lineTo(-bodyWidth * .30, bodyHeight * .09);
     ctx.closePath();
     ctx.fill();
-    ctx.globalAlpha = .5;
+    ctx.globalAlpha = .92;
     ctx.strokeStyle = accentLight;
+    ctx.lineWidth = Math.max(.65, bodyHeight * .045);
     ctx.stroke();
     ctx.globalAlpha = 1;
 
@@ -2389,9 +2819,9 @@
     ctx.save();
     ctx.translate(turretPoint.x, turretPoint.y);
     const turretGradient = ctx.createLinearGradient(0, -turretH, 0, turretH * .35);
-    turretGradient.addColorStop(0, steelLight);
-    turretGradient.addColorStop(.55, steel);
-    turretGradient.addColorStop(1, steelDark);
+    turretGradient.addColorStop(0, accentLight);
+    turretGradient.addColorStop(.48, accent);
+    turretGradient.addColorStop(1, accentDark);
     ctx.fillStyle = turretGradient;
     ctx.beginPath();
     ctx.moveTo(-turretW * .52, turretH * .25);
@@ -2509,7 +2939,7 @@
     gameState.tanks[team].angle = angle;
     gameState.tanks[team].power = power;
     const origin = muzzlePosition(gameState, team, angle);
-    const radians = angle * Math.PI / 180;
+    const radians = worldAngleForTeam(team, angle) * Math.PI / 180;
     let x = origin.x;
     let y = origin.y;
     let vx = Math.cos(radians) * power * .60;
@@ -2522,7 +2952,7 @@
       vy -= gameState.settings.gravity * dt;
       x += vx * dt;
       y += vy * dt;
-      if (x < 0 || x > gameState.settings.worldWidth || y <= terrainAt(x)) break;
+      if (x < 0 || x > gameState.settings.worldWidth || y <= terrainAt(x) || (gameState.ceiling && y >= ceilingAt(x))) break;
       const point = worldToCanvas(x, y);
       ctx.globalAlpha = 1 - i / 12;
       ctx.beginPath();
@@ -2548,18 +2978,18 @@
       const x = a.x + (b.x - a.x) * blend;
       const y = a.y + (b.y - a.y) * blend;
       drawProjectileTrail(packet.trajectory, index);
-      drawProjectile(x, y, packet.shooter);
+      drawProjectile(x, y, packet.shooter, packet.doubleStrike);
 
       if (progress >= 1) {
         animation.phase = "explosion";
         animation.explosionStart = now;
         if (packet.impact && packet.impact.type !== "out") {
-          playExplosionSound(Boolean(packet.hitTeam));
+          playExplosionSound(Boolean(packet.hitTeam || packet.hitTeams?.length));
         }
       }
     } else {
       const explosionProgress = clamp((now - animation.explosionStart) / animation.explosionDuration, 0, 1);
-      if (packet.impact && packet.impact.type !== "out") drawExplosion(packet.impact.x, packet.impact.y, explosionProgress, packet.hitTeam);
+      if (packet.impact && packet.impact.type !== "out") drawExplosion(packet.impact.x, packet.impact.y, explosionProgress, packet.hitTeam, packet.doubleStrike);
       if (explosionProgress >= 1) finishShotAnimation();
     }
   }
@@ -2582,25 +3012,27 @@
     ctx.restore();
   }
 
-  function drawProjectile(x, y, team) {
+  function drawProjectile(x, y, team, doubleStrike = false) {
     const p = worldToCanvas(x, y);
-    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 18);
+    const scale = doubleStrike ? 2 : 1;
+    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 18 * scale);
     glow.addColorStop(0, "rgba(255,255,255,1)");
     glow.addColorStop(.24, team === "blue" ? "rgba(79,164,255,.95)" : "rgba(255,92,99,.95)");
     glow.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 18, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 18 * scale, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "white";
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 4.3, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 4.3 * scale, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  function drawExplosion(x, y, progress, hitTeam) {
+  function drawExplosion(x, y, progress, hitTeam, doubleStrike = false) {
     const p = worldToCanvas(x, y);
-    const radius = 16 + Math.sin(progress * Math.PI) * 80;
+    const scale = doubleStrike ? 2 : 1;
+    const radius = (16 + Math.sin(progress * Math.PI) * 80) * scale;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     const blast = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
@@ -2614,9 +3046,9 @@
     ctx.fill();
 
     const random = mulberry32((gameState.shotNumber + 1) * 1299709);
-    for (let i = 0; i < 24; i += 1) {
+    for (let i = 0; i < (doubleStrike ? 42 : 24); i += 1) {
       const angle = random() * Math.PI * 2;
-      const distance = progress * (30 + random() * 90);
+      const distance = progress * (30 + random() * 90) * scale;
       const px = p.x + Math.cos(angle) * distance;
       const py = p.y + Math.sin(angle) * distance;
       ctx.globalAlpha = 1 - progress;
@@ -2668,11 +3100,38 @@
     });
   }
 
+  function toggleBattlefieldPanel() {
+    const panel = dom.sideColumn.querySelector('[data-panel="battlefield"]');
+    if (!panel) return;
+    if (window.innerWidth <= 720) {
+      const opening = !panel.classList.contains("mobile-open");
+      panel.classList.toggle("mobile-open", opening);
+      togglePanel(panel, !opening);
+      dom.worldToolButton.classList.toggle("active", opening);
+      return;
+    }
+    togglePanel(panel);
+    dom.worldToolButton.classList.toggle("active", !panel.classList.contains("collapsed"));
+  }
+
   function toggleSound() {
     soundEnabled = !soundEnabled;
     dom.soundButton.classList.toggle("active", soundEnabled);
     dom.soundButton.textContent = soundEnabled ? "♪" : "×";
     if (soundEnabled) playIncomingChatSound();
+  }
+
+  function updateDoubleStrikeButton() {
+    dom.doubleStrikeButton.classList.toggle("active", doubleStrikeSelected);
+    dom.doubleStrikeButton.setAttribute("aria-pressed", String(doubleStrikeSelected));
+    dom.doubleStrikeButton.querySelector("span").textContent = doubleStrikeSelected ? "DOUBLE STRIKE ARMED" : "DOUBLE STRIKE";
+  }
+
+  function toggleDoubleStrike() {
+    if (!canLocalAct()) return;
+    doubleStrikeSelected = !doubleStrikeSelected;
+    updateDoubleStrikeButton();
+    playUiSound();
   }
 
   function updateAimOutputs() {
@@ -2716,18 +3175,29 @@
   dom.angleInput.addEventListener("input", updateAimOutputs);
   dom.powerInput.addEventListener("input", updateAimOutputs);
   dom.fireButton.addEventListener("click", requestFire);
+  dom.doubleStrikeButton.addEventListener("click", toggleDoubleStrike);
   dom.chatForm.addEventListener("submit", submitChat);
   dom.soundButton.addEventListener("click", toggleSound);
+  dom.worldToolButton.addEventListener("click", toggleBattlefieldPanel);
   dom.locatorButton.addEventListener("click", toggleInspectionMode);
   dom.fullscreenButton.addEventListener("click", toggleFullscreen);
   dom.restartRoundButton.addEventListener("click", () => requestRoundAction("restart"));
   dom.regenerateMapButton.addEventListener("click", () => requestRoundAction("regenerate"));
+  dom.gameLocationSelect.addEventListener("change", updateGameControls);
+  dom.changeWorldButton.addEventListener("click", requestWorldChange);
   dom.replayRequestButton.addEventListener("click", () => requestRoundAction("replay"));
-  dom.returnMenuButton.addEventListener("click", resetAll);
+  dom.returnMenuButton.addEventListener("click", returnToMenuPreservingSession);
   dom.modalCloseButton.addEventListener("click", dismissEndModal);
   dom.replayAcceptButton.addEventListener("click", acceptActionRequest);
   dom.replayDeclineButton.addEventListener("click", declineActionRequest);
-  dom.leaveGameButton.addEventListener("click", resetAll);
+  dom.leaveGameButton.addEventListener("click", returnToMenuPreservingSession);
+  dom.resumeBattleButton.addEventListener("click", () => {
+    if (!gameState) return;
+    setScreen("game");
+    setConnectionStatus(role === "bot" ? "Computer opponent" : "Connected directly", "online");
+    updateGameUI(true);
+  });
+  dom.disconnectSessionButton.addEventListener("click", resetAll);
   document.addEventListener("keydown", keyboardControls);
   document.addEventListener("fullscreenchange", updateFullscreenButton);
   document.addEventListener("pointerdown", ensureAudio, { once: true });

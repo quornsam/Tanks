@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v4</title>
+  <title>Red vs Blue — P2P Tanks v5</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
     <header class="topbar">
       <div class="brand-lockup">
         <span class="brand-kicker">PEER-TO-PEER ARTILLERY</span>
-        <h1>RED <span>vs</span> BLUE</h1>
+        <h1><span class="brand-red">RED</span> <span class="brand-vs">vs</span> <span class="brand-blue">BLUE</span><span class="brand-tank" aria-hidden="true"><i></i><b></b></span></h1>
       </div>
       <div id="connectionPill" class="connection-pill offline">
         <span class="connection-dot"></span>
@@ -39,6 +39,19 @@
           </div>
         </div>
 
+        <section id="connectedMenuBar" class="connected-menu-bar hidden" aria-live="polite">
+          <div>
+            <span class="connection-dot"></span>
+            <strong id="connectedMenuTitle">Still connected</strong>
+            <small id="connectedMenuText">Your opponent and chat remain connected.</small>
+          </div>
+          <div class="connected-menu-actions">
+            <button id="resumeBattleButton" class="secondary-button accept-button">Resume battle</button>
+            <button id="disconnectSessionButton" class="secondary-button danger-button">Disconnect</button>
+          </div>
+        </section>
+        <div id="menuChatDock" class="menu-chat-dock hidden"></div>
+
         <div class="home-grid">
           <section class="panel setup-panel">
             <div class="panel-heading">
@@ -57,6 +70,7 @@
                   <option value="moon">Moon</option>
                   <option value="mars">Mars</option>
                   <option value="space">Space asteroid</option>
+                  <option value="cave">Cave</option>
                 </select>
               </label>
 
@@ -93,7 +107,7 @@
             </div>
             <div id="visibilityWarning" class="visibility-warning hidden" role="alert" aria-live="polite">
               <span class="warning-icon">⚠</span>
-              <div><strong>Tanks may be difficult to see</strong><small id="visibilityWarningText">Use the magnifying-glass locator during play.</small></div>
+              <div><strong>Tanks may be difficult to see</strong><small id="visibilityWarningText">Use terrain inspection or drag directly on the battlefield to aim.</small></div>
             </div>
           </section>
 
@@ -168,7 +182,6 @@
               <div class="turn-card">
                 <span id="turnLabel">BLUE TURN</span>
                 <strong id="windLabel">WIND 0.0 →</strong>
-                <small id="worldLabel">EARTH · GRAVITY 9.81</small>
                 <div class="scoreboard-strip" aria-label="Running match score">
                   <span>BLUE <b id="blueScore">0</b></span>
                   <em>ROUND <b id="roundNumber">1</b></em>
@@ -198,6 +211,7 @@
                 </div>
               </div>
               <div id="canvasViewLabel" class="canvas-view-label">WHOLE BATTLEFIELD</div>
+              <button id="worldToolButton" class="canvas-tool world-tool" title="World and battlefield controls" aria-label="World and battlefield controls">◉</button>
               <button id="soundButton" class="canvas-tool sound-tool active" title="Toggle sound" aria-label="Toggle sound">♪</button>
               <button id="locatorButton" class="canvas-tool locator-tool" title="Inspect terrain" aria-label="Inspect terrain">⌖</button>
               <button id="fullscreenButton" class="canvas-tool" title="Full screen" aria-label="Full screen">⛶</button>
@@ -215,7 +229,7 @@
 
               <label class="aim-control">
                 <span class="control-title">ANGLE <output id="angleOutput">45°</output></span>
-                <input id="angleInput" type="range" min="5" max="175" step="1" value="45">
+                <input id="angleInput" type="range" min="5" max="85" step="1" value="45">
               </label>
 
               <label class="aim-control">
@@ -223,14 +237,20 @@
                 <input id="powerInput" type="range" min="18" max="100" step="1" value="62">
               </label>
 
-              <button id="fireButton" class="fire-button">
-                <span>FIRE</span>
-                <small>Spacebar</small>
-              </button>
+              <div class="fire-controls">
+                <button id="doubleStrikeButton" class="double-strike-button" type="button" aria-pressed="false">
+                  <span>DOUBLE STRIKE</span>
+                  <small>2× blast · opponent may get two turns</small>
+                </button>
+                <button id="fireButton" class="fire-button">
+                  <span>FIRE</span>
+                  <small>Spacebar</small>
+                </button>
+              </div>
             </div>
           </section>
 
-          <aside class="side-column">
+          <aside id="sideColumn" class="side-column">
             <section class="panel compact-panel telemetry-panel collapsible-panel" data-panel="telemetry">
               <div class="panel-heading compact">
                 <div>
@@ -249,7 +269,7 @@
               </div>
             </section>
 
-            <section class="panel compact-panel chat-panel collapsible-panel" data-panel="chat">
+            <section id="chatPanel" class="panel compact-panel chat-panel collapsible-panel" data-panel="chat">
               <div class="panel-heading compact">
                 <div>
                   <p class="eyebrow">COMMS</p>
@@ -275,6 +295,19 @@
                 <div class="panel-heading-actions"><span id="roundControlBadge" class="mini-badge">HOST</span><button class="collapse-button" type="button" aria-label="Collapse battlefield controls" title="Collapse panel">−</button></div>
               </div>
               <div class="panel-body">
+              <div class="game-world-control">
+                <label for="gameLocationSelect">World</label>
+                <div>
+                  <select id="gameLocationSelect">
+                    <option value="earth">Earth</option>
+                    <option value="mars">Mars</option>
+                    <option value="moon">Moon</option>
+                    <option value="space">Space asteroid</option>
+                    <option value="cave">Cave</option>
+                  </select>
+                  <button id="changeWorldButton" class="round-action-button" type="button">Change</button>
+                </div>
+              </div>
               <div class="round-action-grid">
                 <button id="restartRoundButton" class="round-action-button">
                   <strong>Restart</strong><span>Same map</span>
@@ -295,7 +328,7 @@
               <div class="panel-body"><div id="eventLog" class="event-log" role="log" aria-live="polite"></div></div>
             </section>
 
-            <button id="leaveGameButton" class="leave-game-button">Leave battle</button>
+            <button id="leaveGameButton" class="leave-game-button">Return to menu</button>
           </aside>
         </div>
       </section>
