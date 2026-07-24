@@ -972,3 +972,36 @@ body.game-active main { height: calc(100dvh - 54px); }
 @media (max-height: 720px), (max-width: 720px) {
   body.game-active main { height: calc(100dvh - 44px); }
 }
+
+
+/* v6 — reliable guest hand-off and consistent title clearance */
+.brand-lockup {
+  display: grid;
+  align-content: center;
+  padding: 5px 0 10px;
+}
+.brand-lockup h1 {
+  margin-bottom: 0;
+  line-height: 1;
+}
+body.game-active .topbar {
+  height: 52px;
+  min-height: 52px;
+  padding-bottom: 0;
+}
+body.game-active .brand-lockup {
+  padding: 3px 0 8px;
+}
+body.game-active main { height: calc(100dvh - 58px); }
+
+@media (max-height: 720px) {
+  body.game-active .topbar { height: 44px; min-height: 44px; padding-bottom: 0; }
+  body.game-active .brand-lockup { padding: 2px 0 7px; }
+  body.game-active main { height: calc(100dvh - 48px); }
+}
+
+@media (max-width: 720px) {
+  body.game-active .topbar { height: 44px; min-height: 44px; padding-bottom: 0; }
+  body.game-active .brand-lockup { padding: 2px 0 7px; }
+  body.game-active main { height: calc(100dvh - 48px); }
+}

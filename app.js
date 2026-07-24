@@ -122,6 +122,9 @@
   let role = null;
   let accepted = false;
   let acceptRequested = false;
+  let guestReadyTimer = null;
+  let initialGameToken = null;
+  let receivedInitialGameToken = null;
   let isResetting = false;
   let gameState = null;
   let animation = null;
@@ -481,7 +484,7 @@
       const outgoing = peer.connect(PREFIX + code, {
         reliable: true,
         serialization: "json",
-        metadata: { application: "red-blue-tanks", version: 5, request: "join" }
+        metadata: { application: "red-blue-tanks", version: 6, request: "join" }
       });
       connection = outgoing;
       wireConnection(outgoing);
@@ -505,6 +508,7 @@
 
     conn.on("close", () => {
       if (isResetting) return;
+      clearGuestReadyHandshake();
       accepted = false;
       connection = null;
       pendingConnection = null;
@@ -541,11 +545,14 @@
       case "accepted":
         if (role !== "guest") return;
         accepted = true;
+        initialGameToken = data.token || null;
+        receivedInitialGameToken = null;
         renderRulesSummary(data.settings);
         dom.lobbyTitle.textContent = "Host accepted";
-        dom.lobbyMessage.textContent = "Receiving the battlefield…";
+        dom.lobbyMessage.textContent = "Preparing the battlefield…";
         setConnectionStatus("Connected directly", "online");
-        addLobbyLog("Host accepted the connection.");
+        addLobbyLog("Host accepted the connection. Confirming battlefield transfer…");
+        beginGuestReadyHandshake();
         break;
 
       case "declined":
@@ -556,11 +563,31 @@
         addLobbyLog("The host declined the join request.");
         break;
 
+      case "guest-ready":
+        if (role !== "host" || !accepted || !connection?.open || !gameState) return;
+        if (data.token && initialGameToken && data.token !== initialGameToken) return;
+        sendInitialGameState();
+        break;
+
       case "game-init":
         if (role !== "guest") return;
+        if (initialGameToken && data.token && data.token !== initialGameToken) return;
+        clearGuestReadyHandshake();
+        if (receivedInitialGameToken && receivedInitialGameToken === data.token) {
+          connection?.send({ type: "game-init-ack", token: data.token });
+          return;
+        }
+        receivedInitialGameToken = data.token || "legacy";
         accepted = true;
         enterGame(data.state);
+        connection?.send({ type: "game-init-ack", token: data.token || null });
         addEvent("Battlefield received from host.");
+        break;
+
+      case "game-init-ack":
+        if (role !== "host") return;
+        if (data.token && initialGameToken && data.token !== initialGameToken) return;
+        addEvent("Guest battlefield confirmed.");
         break;
 
       case "input":
@@ -627,15 +654,52 @@
     pendingConnection = null;
     acceptRequested = false;
     accepted = true;
+    initialGameToken = `${Date.now().toString(36)}-${makeCode(4)}`;
+    receivedInitialGameToken = null;
     dom.acceptButton.disabled = false;
     dom.acceptButton.textContent = "Accept";
     dom.incomingRequest.classList.add("hidden");
-    connection.send({ type: "accepted", settings: readSettings() });
-    addLobbyLog("Guest accepted. Generating the shared battlefield…");
-    const state = createGameState(readSettings());
-    connection.send({ type: "game-init", state });
+
+    const settings = readSettings();
+    const state = createGameState(settings);
     enterGame(state);
-    addEvent("Guest connected. Blue fires first.");
+    connection.send({ type: "accepted", settings, token: initialGameToken });
+    addEvent("Guest accepted. Waiting for battlefield confirmation…");
+  }
+
+  function compactInitialGameState(state) {
+    const packet = deepClone(state);
+    delete packet.baseTerrain;
+    delete packet.baseCeiling;
+    return packet;
+  }
+
+  function sendInitialGameState() {
+    if (role !== "host" || !connection?.open || !gameState) return;
+    connection.send({
+      type: "game-init",
+      token: initialGameToken,
+      state: compactInitialGameState(gameState)
+    });
+    addEvent("Sending battlefield to guest…");
+  }
+
+  function beginGuestReadyHandshake() {
+    clearGuestReadyHandshake();
+    const announceReady = () => {
+      if (role !== "guest" || !accepted || !connection?.open || gameState) {
+        clearGuestReadyHandshake();
+        return;
+      }
+      connection.send({ type: "guest-ready", token: initialGameToken });
+    };
+    announceReady();
+    guestReadyTimer = setInterval(announceReady, 2500);
+  }
+
+  function clearGuestReadyHandshake() {
+    if (guestReadyTimer) clearInterval(guestReadyTimer);
+    guestReadyTimer = null;
   }
 
   function declineGuest() {
@@ -676,7 +740,7 @@
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
     const state = {
-      version: 5,
+      version: 6,
       seed,
       settings,
       terrain: terrain.map(value => round(value, 3)),
@@ -973,7 +1037,7 @@
     for (const team of ["blue", "red"]) {
       state.tanks[team].angle = elevationFromWorldAngle(team, state.tanks[team].angle);
     }
-    state.version = 5;
+    state.version = 6;
     return state;
   }
 
@@ -1784,6 +1848,9 @@
     pendingActionRequest = null;
     localActionRequest = null;
     acceptRequested = false;
+    clearGuestReadyHandshake();
+    initialGameToken = null;
+    receivedInitialGameToken = null;
     winnerModalDismissed = false;
     doubleStrikeSelected = false;
     updateDoubleStrikeButton();
@@ -1812,6 +1879,9 @@
     role = null;
     accepted = false;
     acceptRequested = false;
+    clearGuestReadyHandshake();
+    initialGameToken = null;
+    receivedInitialGameToken = null;
     gameState = null;
     animation = null;
     movementAnimation = null;
