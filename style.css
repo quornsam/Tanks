@@ -494,3 +494,289 @@ input[type="range"] { width: 100%; accent-color: var(--blue); }
   background: rgba(5, 10, 18, .62);
   box-shadow: none;
 }
+
+/* v4 — inspection camera, compact collapsible cockpit and grittier presentation */
+:root {
+  --panel: rgba(18, 22, 25, .97);
+  --panel-2: #20262a;
+  --line: #3d4446;
+  --muted: #a1a7a5;
+  --blue: #668ba0;
+  --blue-deep: #3c6175;
+  --red: #92534e;
+  --red-deep: #66332f;
+  --green: #7fa984;
+  --yellow: #c7aa68;
+  --shadow: 0 12px 32px rgba(0, 0, 0, .42);
+}
+
+body {
+  background:
+    radial-gradient(circle at 15% -5%, rgba(55, 80, 91, .2), transparent 32rem),
+    radial-gradient(circle at 92% 8%, rgba(90, 50, 46, .15), transparent 28rem),
+    linear-gradient(180deg, #111519, #07090b);
+}
+
+.panel,
+.tank-card,
+.turn-card,
+.controls-panel {
+  border-radius: 7px;
+  background-color: rgba(20, 24, 27, .97);
+  background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.012) 0 1px, transparent 1px 5px);
+  box-shadow: 0 8px 24px rgba(0,0,0,.32);
+}
+
+.primary-button,
+.join-button,
+.secondary-button,
+.round-action-button,
+.fire-button,
+.control-button,
+.canvas-tool,
+.leave-game-button,
+.icon-button,
+.copy-button,
+select,
+input[type="text"] { border-radius: 5px; }
+
+.blue-button { background: linear-gradient(135deg, #496c7d, #2d4653); }
+.neutral-button { background: linear-gradient(135deg, #3e4548, #292f32); }
+.fire-button {
+  color: #efe9df;
+  background: linear-gradient(180deg, #873f3b, #5e2c29);
+  border: 1px solid #a75b54;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), inset 0 -3px 0 rgba(0,0,0,.28);
+}
+.fire-button small { color: rgba(239,233,223,.62); }
+
+/* Definite breathing room beneath both team read-outs. */
+.tank-card { padding: 11px 15px 17px; }
+.hit-pips { margin-top: 11px; margin-bottom: 2px; }
+.team-swatch { border-radius: 2px; }
+.hit-pip { border-radius: 1px; }
+
+.canvas-frame {
+  border-radius: 6px;
+  border-color: #555b5c;
+  background: #0d1011;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+}
+.canvas-frame.inspection-active { border-color: #949b94; }
+.canvas-frame.inspection-active #gameCanvas { cursor: crosshair; }
+.canvas-view-label {
+  border-radius: 3px;
+  color: #d4d8d3;
+  background: rgba(10, 12, 12, .72);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.canvas-tool { background: rgba(12, 14, 14, .78); }
+.canvas-tool.active {
+  color: #121612;
+  border-color: #b4b9b1;
+  background: #b4b9b1;
+  box-shadow: none;
+}
+
+.canvas-dialog {
+  position: relative;
+  border-radius: 6px;
+  border-color: #585e5e;
+  background: rgba(16, 19, 20, .96);
+  box-shadow: 0 18px 50px rgba(0,0,0,.58);
+  backdrop-filter: blur(6px);
+}
+.modal-close-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #555c5d;
+  border-radius: 3px;
+  color: #d7d9d6;
+  background: #252a2b;
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+.overlay-primary { color: #111612; background: #91aa91; }
+.overlay-secondary { color: #e6e2dc; background: #373d3f; border: 1px solid #596063; }
+
+.panel-heading-actions { display: flex; align-items: center; gap: 7px; }
+.collapse-button {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid #4b5355;
+  border-radius: 3px;
+  color: #d4d8d5;
+  background: #22282a;
+  font-size: 1rem;
+  font-weight: 800;
+}
+.collapsible-panel { min-height: 0; transition: padding .14s ease; }
+.collapsible-panel .panel-body { min-height: 0; }
+.collapsible-panel.collapsed { padding-top: 10px; padding-bottom: 10px; }
+.collapsible-panel.collapsed .panel-body { display: none; }
+.collapsible-panel.collapsed .panel-heading h3 { margin-top: 1px; font-size: .84rem; }
+.collapsible-panel.collapsed .eyebrow { display: none; }
+
+body.game-active { overflow: hidden; }
+body.game-active .app-shell {
+  width: calc(100% - 12px);
+  max-width: 1800px;
+  height: 100dvh;
+  padding: 4px 0 6px;
+}
+body.game-active .topbar {
+  min-height: 42px;
+  height: 42px;
+}
+body.game-active .brand-kicker { display: none; }
+body.game-active .brand-lockup h1 { font-size: 1.45rem; }
+body.game-active .connection-pill { padding: 6px 10px; }
+body.game-active main { height: calc(100dvh - 46px); min-height: 0; }
+body.game-active .game-screen,
+body.game-active .game-layout { height: 100%; min-height: 0; }
+body.game-active .game-layout {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr) clamp(244px, 22vw, 310px);
+  gap: 8px;
+  align-items: stretch;
+}
+body.game-active .battle-column {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 7px;
+}
+body.game-active .battle-hud { margin: 0; gap: 7px; }
+body.game-active .tank-card,
+body.game-active .turn-card { min-height: 60px; }
+body.game-active .canvas-frame {
+  min-height: 0;
+  height: 100%;
+  aspect-ratio: auto;
+}
+body.game-active .controls-panel {
+  margin: 0;
+  padding: 8px 10px;
+  gap: 9px;
+  grid-template-columns: 120px minmax(120px, 1fr) minmax(120px, 1fr) 112px;
+}
+body.game-active .fire-button { min-height: 50px; }
+body.game-active .side-column {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow: hidden;
+}
+body.game-active .compact-panel { padding: 11px 12px; }
+body.game-active .panel-heading.compact h3 { font-size: .91rem; }
+body.game-active .panel-heading.compact .eyebrow { font-size: .55rem; }
+body.game-active .telemetry-grid { margin-top: 9px; gap: 6px; }
+body.game-active .telemetry-grid div { padding: 7px; border-radius: 3px; }
+body.game-active .chat-panel:not(.collapsed) { flex: 1 1 180px; display: flex; flex-direction: column; }
+body.game-active .chat-panel-body { flex: 1; display: flex; min-height: 0; flex-direction: column; }
+body.game-active .chat-log { flex: 1; min-height: 54px; height: auto; margin-top: 8px; }
+body.game-active .chat-form { margin-top: 7px; }
+body.game-active .round-action-grid { margin-top: 8px; }
+body.game-active .round-control-note { margin-top: 6px; }
+body.game-active .event-panel:not(.collapsed) { flex: 0 1 128px; }
+body.game-active .event-log { max-height: 82px; margin-top: 6px; }
+body.game-active .leave-game-button { padding: 7px; flex: 0 0 auto; }
+
+/* Override the older one-column breakpoint: a narrower cockpit still fits on laptops. */
+@media (max-width: 1100px) and (min-width: 721px) {
+  body.game-active .game-layout { grid-template-columns: minmax(0, 1fr) 244px; }
+  body.game-active .side-column { display: flex; grid-template-columns: none; }
+  body.game-active .leave-game-button { grid-column: auto; }
+  body.game-active .controls-panel { grid-template-columns: 105px 1fr 1fr 102px; }
+}
+
+@media (max-height: 720px) {
+  body.game-active .topbar { min-height: 34px; height: 34px; }
+  body.game-active main { height: calc(100dvh - 38px); }
+  body.game-active .tank-card,
+  body.game-active .turn-card { min-height: 50px; padding-top: 7px; padding-bottom: 9px; }
+  body.game-active .hit-pips { margin-top: 6px; }
+  body.game-active .controls-panel { padding: 5px 8px; }
+  body.game-active .move-controls small,
+  body.game-active .fire-button small { display: none; }
+}
+
+@media (max-width: 720px) {
+  body.game-active .app-shell { width: calc(100% - 6px); padding: 2px 0 3px; }
+  body.game-active .topbar { min-height: 35px; height: 35px; }
+  body.game-active .brand-lockup h1 { font-size: 1.05rem; }
+  body.game-active .connection-pill { max-width: 54%; padding: 4px 7px; font-size: .65rem; }
+  body.game-active main { height: calc(100dvh - 38px); }
+  body.game-active .game-layout { grid-template-columns: 1fr; }
+  body.game-active .side-column {
+    position: absolute;
+    z-index: 18;
+    top: 69px;
+    right: 5px;
+    width: min(78vw, 270px);
+    height: auto;
+    max-height: calc(100% - 145px);
+    pointer-events: none;
+  }
+  body.game-active .side-column > * { pointer-events: auto; }
+  body.game-active .side-column .collapsible-panel:not(.collapsed) { box-shadow: 0 8px 25px rgba(0,0,0,.58); }
+  body.game-active .side-column .telemetry-panel,
+  body.game-active .side-column .round-panel,
+  body.game-active .side-column .event-panel,
+  body.game-active .side-column .leave-game-button { display: none; }
+  body.game-active .chat-panel { align-self: flex-end; width: 100%; }
+  body.game-active .chat-panel.collapsed { width: 130px; margin-left: auto; }
+  body.game-active .battle-hud { grid-template-columns: 1fr 1.35fr 1fr; }
+  body.game-active .tank-card,
+  body.game-active .turn-card { min-height: 47px; padding: 5px 6px 7px; }
+  body.game-active .tank-card-title { font-size: .62rem; }
+  body.game-active .hit-pips { margin-top: 5px; gap: 3px; }
+  body.game-active .hit-pip { width: 11px; height: 4px; }
+  body.game-active .turn-card small { display: none; }
+  body.game-active .scoreboard-strip { margin-top: 2px; padding-top: 2px; }
+  body.game-active .controls-panel { grid-template-columns: 78px 1fr 1fr 78px; gap: 4px; padding: 4px; }
+  body.game-active .control-title { font-size: .5rem; }
+  body.game-active .fire-button { min-height: 42px; }
+  body.game-active .move-controls small,
+  body.game-active .fire-button small { display: none; }
+}
+@media (max-width: 720px) {
+  body.game-active .side-column { top: 116px; }
+}
+
+/* Remove the old toy-like title illustration. */
+.hero-card { grid-template-columns: 1fr; background: repeating-linear-gradient(135deg, rgba(255,255,255,.015) 0 1px, transparent 1px 6px), linear-gradient(110deg, #242b2e, #111618); }
+.hero-art { display: none; }
+
+/* Full screen keeps the complete collapsible cockpit rather than hiding it. */
+#gameScreen:fullscreen .game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(244px, 22vw, 310px);
+  gap: 8px;
+}
+#gameScreen:fullscreen .side-column {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+}
+#gameScreen:fullscreen .battle-column {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+@media (max-width: 720px) {
+  #gameScreen:fullscreen .game-layout { grid-template-columns: 1fr; }
+  #gameScreen:fullscreen .side-column { display: flex; }
+}
+@media (max-width: 720px) {
+  body.game-active .side-column { top: 220px; }
+}

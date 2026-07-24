@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v3</title>
+  <title>Red vs Blue — P2P Tanks v4</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -186,10 +186,12 @@
               <canvas id="gameCanvas" width="1280" height="720" aria-label="Tank battlefield"></canvas>
               <div id="canvasMessage" class="canvas-message hidden">
                 <div class="canvas-dialog">
+                  <button id="modalCloseButton" class="modal-close-button" type="button" title="Close" aria-label="Close">×</button>
                   <strong id="canvasMessageTitle"></strong>
                   <span id="canvasMessageSub"></span>
                   <div id="canvasMessageActions" class="canvas-message-actions hidden">
-                    <button id="replayRequestButton" class="overlay-primary">Request replay</button>
+                    <button id="replayRequestButton" class="overlay-primary">Play again</button>
+                    <button id="returnMenuButton" class="overlay-secondary">Return to menu</button>
                     <button id="replayAcceptButton" class="overlay-primary hidden">Accept</button>
                     <button id="replayDeclineButton" class="overlay-secondary hidden">Decline</button>
                   </div>
@@ -197,7 +199,7 @@
               </div>
               <div id="canvasViewLabel" class="canvas-view-label">WHOLE BATTLEFIELD</div>
               <button id="soundButton" class="canvas-tool sound-tool active" title="Toggle sound" aria-label="Toggle sound">♪</button>
-              <button id="locatorButton" class="canvas-tool locator-tool" title="Find tanks" aria-label="Find tanks">⌕</button>
+              <button id="locatorButton" class="canvas-tool locator-tool" title="Inspect terrain" aria-label="Inspect terrain">⌖</button>
               <button id="fullscreenButton" class="canvas-tool" title="Full screen" aria-label="Full screen">⛶</button>
             </div>
 
@@ -229,44 +231,50 @@
           </section>
 
           <aside class="side-column">
-            <section class="panel compact-panel telemetry-panel">
+            <section class="panel compact-panel telemetry-panel collapsible-panel" data-panel="telemetry">
               <div class="panel-heading compact">
                 <div>
                   <p class="eyebrow">SHOT COMPUTER</p>
                   <h3>Telemetry</h3>
                 </div>
-                <span id="connectionBadge" class="mini-badge">LOCAL</span>
+                <div class="panel-heading-actions"><span id="connectionBadge" class="mini-badge">LOCAL</span><button class="collapse-button" type="button" aria-label="Collapse telemetry" title="Collapse panel">−</button></div>
               </div>
+              <div class="panel-body">
               <dl class="telemetry-grid">
                 <div><dt>Current wind</dt><dd id="telemetryWind">0.0</dd></div>
                 <div><dt>Gravity</dt><dd id="telemetryGravity">9.81</dd></div>
                 <div><dt>Move step</dt><dd id="telemetryMove">2.8</dd></div>
                 <div><dt>Hits needed</dt><dd id="telemetryHits">3</dd></div>
               </dl>
+              </div>
             </section>
 
-            <section class="panel compact-panel chat-panel">
+            <section class="panel compact-panel chat-panel collapsible-panel" data-panel="chat">
               <div class="panel-heading compact">
                 <div>
                   <p class="eyebrow">COMMS</p>
                   <h3>Battle chat</h3>
                 </div>
+                <button class="collapse-button" type="button" aria-label="Collapse chat" title="Collapse panel">−</button>
               </div>
-              <div id="chatLog" class="chat-log" role="log" aria-live="polite"></div>
-              <form id="chatForm" class="chat-form">
-                <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Type a message…" aria-label="Chat message">
-                <button type="submit" aria-label="Send message">➤</button>
-              </form>
+              <div class="panel-body chat-panel-body">
+                <div id="chatLog" class="chat-log" role="log" aria-live="polite"></div>
+                <form id="chatForm" class="chat-form">
+                  <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Type a message…" aria-label="Chat message">
+                  <button type="submit" aria-label="Send message">➤</button>
+                </form>
+              </div>
             </section>
 
-            <section class="panel compact-panel round-panel">
+            <section class="panel compact-panel round-panel collapsible-panel" data-panel="battlefield">
               <div class="panel-heading compact">
                 <div>
                   <p class="eyebrow">MATCH CONTROL</p>
                   <h3>Battlefield</h3>
                 </div>
-                <span id="roundControlBadge" class="mini-badge">HOST</span>
+                <div class="panel-heading-actions"><span id="roundControlBadge" class="mini-badge">HOST</span><button class="collapse-button" type="button" aria-label="Collapse battlefield controls" title="Collapse panel">−</button></div>
               </div>
+              <div class="panel-body">
               <div class="round-action-grid">
                 <button id="restartRoundButton" class="round-action-button">
                   <strong>Restart</strong><span>Same map</span>
@@ -276,11 +284,15 @@
                 </button>
               </div>
               <p id="roundControlNote" class="round-control-note">The host controls battlefield resets.</p>
+              </div>
             </section>
 
-            <section class="panel compact-panel event-panel">
-              <p class="eyebrow">BATTLE LOG</p>
-              <div id="eventLog" class="event-log" role="log" aria-live="polite"></div>
+            <section class="panel compact-panel event-panel collapsible-panel collapsed" data-panel="log">
+              <div class="panel-heading compact">
+                <div><p class="eyebrow">BATTLE LOG</p><h3>Events</h3></div>
+                <button class="collapse-button" type="button" aria-label="Expand battle log" title="Expand panel">+</button>
+              </div>
+              <div class="panel-body"><div id="eventLog" class="event-log" role="log" aria-live="polite"></div></div>
             </section>
 
             <button id="leaveGameButton" class="leave-game-button">Leave battle</button>

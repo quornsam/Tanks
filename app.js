@@ -70,6 +70,8 @@
     canvasMessageSub: $("canvasMessageSub"),
     canvasMessageActions: $("canvasMessageActions"),
     replayRequestButton: $("replayRequestButton"),
+    returnMenuButton: $("returnMenuButton"),
+    modalCloseButton: $("modalCloseButton"),
     replayAcceptButton: $("replayAcceptButton"),
     replayDeclineButton: $("replayDeclineButton"),
     canvasViewLabel: $("canvasViewLabel"),
@@ -118,8 +120,22 @@
   let soundEnabled = true;
   let audioContext = null;
   let lastFrameTime = performance.now();
-  let viewMode = "world";
   let visibilityWarningActive = false;
+  let winnerModalDismissed = false;
+  const inspectionCamera = {
+    active: false,
+    centerX: 0,
+    centerY: WORLD_HEIGHT / 2,
+    zoom: 1,
+    targetX: null,
+    targetY: null,
+    dragging: false,
+    lastClientX: 0,
+    lastClientY: 0,
+    pointers: new Map(),
+    pinchDistance: 0,
+    pinchZoom: 1
+  };
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -165,6 +181,11 @@
     dom.homeScreen.classList.toggle("hidden", name !== "home");
     dom.lobbyScreen.classList.toggle("hidden", name !== "lobby");
     dom.gameScreen.classList.toggle("hidden", name !== "game");
+    document.body.classList.toggle("game-active", name === "game");
+    if (name === "game") requestAnimationFrame(() => {
+      resizeCanvasToDisplaySize();
+      fitPanelsToViewport();
+    });
   }
 
   function setConnectionStatus(text, kind = "offline") {
@@ -496,7 +517,7 @@
       case "chat":
         if (typeof data.text !== "string") return;
         addChatMessage(TEAM_NAMES[data.sender] || "Player", data.text.slice(0, 180));
-        playChatSound();
+        playIncomingChatSound();
         break;
 
       default:
@@ -552,7 +573,7 @@
     const state = createGameState(readSettings());
     enterGame(state);
     addEvent("Computer opponent ready. Blue fires first.");
-    addChatMessage("Computer", "Systems online. Try not to scratch the paint.", false, true);
+    addChatMessage("Computer", "Link established. Fire-control system active.", false, true);
   }
 
   function createGameState(settings, session = {}) {
@@ -560,14 +581,14 @@
     const terrain = generateTerrain(settings, seed);
     const spawnPositions = chooseSpawnPositions(terrain, settings, seed);
     guaranteeSpawnHeightDifference(terrain, spawnPositions, settings);
-    const padRadius = Math.max(2.8, 5.4 * (settings.tankSize / 100));
+    const padRadius = Math.max(6.5, 9.2 * (settings.tankSize / 100));
     flattenTerrain(terrain, spawnPositions.blue, settings.worldWidth, padRadius);
     flattenTerrain(terrain, spawnPositions.red, settings.worldWidth, padRadius);
 
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
     const state = {
-      version: 3,
+      version: 4,
       seed,
       settings,
       terrain: terrain.map(value => round(value, 3)),
@@ -755,14 +776,20 @@
 
   function flattenTerrain(values, worldX, worldWidth, radius) {
     const centerIndex = Math.round((worldX / worldWidth) * (values.length - 1));
-    const radiusIndex = Math.max(5, Math.round((radius / worldWidth) * values.length));
+    const radiusIndex = Math.max(10, Math.round((radius / worldWidth) * values.length));
+    const flatIndex = Math.max(5, Math.round(radiusIndex * 0.54));
     const target = values[centerIndex];
     for (let offset = -radiusIndex; offset <= radiusIndex; offset += 1) {
       const index = centerIndex + offset;
       if (index < 0 || index >= values.length) continue;
-      const t = Math.abs(offset) / radiusIndex;
-      const blend = Math.cos(t * Math.PI / 2) ** 2;
-      values[index] = values[index] * (1 - blend) + target * blend;
+      const distance = Math.abs(offset);
+      if (distance <= flatIndex) {
+        values[index] = target;
+      } else {
+        const t = (distance - flatIndex) / Math.max(1, radiusIndex - flatIndex);
+        const blend = Math.cos(t * Math.PI / 2) ** 2;
+        values[index] = values[index] * (1 - blend) + target * blend;
+      }
     }
   }
 
@@ -775,7 +802,8 @@
   function enterGame(state, preserveLogs = false) {
     gameState = normalizeGameState(state);
     animation = null;
-    setViewMode("world", false);
+    resetInspectionView(false);
+    winnerModalDismissed = false;
     localInputPending = false;
     pendingActionRequest = null;
     localActionRequest = null;
@@ -852,13 +880,13 @@
 
     updateGameControls();
 
-    if (gameState.winner && !pendingActionRequest && !localActionRequest) {
+    if (gameState.winner && !pendingActionRequest && !localActionRequest && !winnerModalDismissed) {
       showCanvasMessage(
         `${TEAM_NAMES[gameState.winner].toUpperCase()} WINS`,
         `Match score ${gameState.scores.blue}–${gameState.scores.red}`,
         "winner"
       );
-    } else if (!pendingActionRequest && !localActionRequest) {
+    } else if (!pendingActionRequest && !localActionRequest && !gameState.winner) {
       hideCanvasMessage();
     }
 
@@ -1163,7 +1191,7 @@
 
   function beginShotAnimation(packet) {
     if (!packet || !Array.isArray(packet.trajectory) || packet.trajectory.length < 2) return;
-    setViewMode("world", false);
+    resetInspectionView(false);
     localInputPending = false;
     animation = {
       packet,
@@ -1290,35 +1318,49 @@
       const replies = [
         "Wind correction noted.",
         "I calculate a 63 percent chance you miss.",
-        "Your crater collection is impressive.",
+        "Impact estimate updated.",
         "Adjusting elevation.",
-        "Blue paint is surprisingly visible from here.",
-        "Message received. Target still acquired."
+        "Range correction entered.",
+        "Message received. Target remains acquired."
       ];
-      setTimeout(() => addChatMessage("Computer", replies[Math.floor(Math.random() * replies.length)], false, true), 650);
+      setTimeout(() => {
+        addChatMessage("Computer", replies[Math.floor(Math.random() * replies.length)], false, true);
+        playIncomingChatSound();
+      }, 650);
     } else if (connection && connection.open && accepted) {
       connection.send({ type: "chat", sender: team, text });
     }
+    playOutgoingChatSound();
   }
 
   function showCanvasMessage(message, subtitle = "", mode = "notice") {
     dom.canvasMessageTitle.textContent = message;
     dom.canvasMessageSub.textContent = subtitle;
     dom.canvasMessageSub.classList.toggle("hidden", !subtitle);
-    dom.canvasMessageActions.classList.toggle("hidden", mode === "notice" || mode === "waiting");
+    const hasActions = mode === "winner" || mode === "request";
+    dom.canvasMessageActions.classList.toggle("hidden", !hasActions);
+    dom.modalCloseButton.classList.toggle("hidden", mode !== "winner");
     dom.replayRequestButton.classList.toggle("hidden", mode !== "winner");
+    dom.returnMenuButton.classList.toggle("hidden", mode !== "winner");
     dom.replayAcceptButton.classList.toggle("hidden", mode !== "request");
     dom.replayDeclineButton.classList.toggle("hidden", mode !== "request");
-    dom.replayRequestButton.textContent = role === "bot" ? "Play again" : "Request replay";
+    dom.replayRequestButton.textContent = "Play again";
     dom.canvasMessage.classList.remove("hidden");
   }
 
   function hideCanvasMessage() {
     dom.canvasMessage.classList.add("hidden");
     dom.canvasMessageActions.classList.add("hidden");
+    dom.modalCloseButton.classList.add("hidden");
     dom.replayRequestButton.classList.add("hidden");
+    dom.returnMenuButton.classList.add("hidden");
     dom.replayAcceptButton.classList.add("hidden");
     dom.replayDeclineButton.classList.add("hidden");
+  }
+
+  function dismissEndModal() {
+    winnerModalDismissed = true;
+    hideCanvasMessage();
   }
 
   function actionLabel(action) {
@@ -1466,7 +1508,8 @@
     pendingActionRequest = null;
     localActionRequest = null;
     acceptRequested = false;
-    setViewMode("world", false);
+    winnerModalDismissed = false;
+    resetInspectionView(false);
     dom.homeNotice.textContent = "";
     dom.chatLog.replaceChildren();
     dom.eventLog.replaceChildren();
@@ -1496,7 +1539,8 @@
     localInputPending = false;
     pendingActionRequest = null;
     localActionRequest = null;
-    setViewMode("world", false);
+    winnerModalDismissed = false;
+    resetInspectionView(false);
     dom.lobbyLog.replaceChildren();
     dom.chatLog.replaceChildren();
     dom.eventLog.replaceChildren();
@@ -1535,43 +1579,157 @@
     requestAnimationFrame(resizeCanvasToDisplaySize);
   }
 
-  function setViewMode(mode, announce = true) {
-    viewMode = ["world", "blue", "red"].includes(mode) ? mode : "world";
-    if (!dom.canvasViewLabel || !dom.locatorButton) return;
-    const labels = {
-      world: "WHOLE BATTLEFIELD",
-      blue: "LOCATING BLUE TANK",
-      red: "LOCATING RED TANK"
-    };
-    dom.canvasViewLabel.textContent = labels[viewMode];
-    dom.locatorButton.classList.toggle("active", viewMode !== "world");
-    dom.locatorButton.title = viewMode === "world" ? "Find blue tank" : viewMode === "blue" ? "Find red tank" : "Return to whole battlefield";
-    dom.locatorButton.setAttribute("aria-label", dom.locatorButton.title);
-    if (announce && gameState) {
-      playLocatorSound();
-      addEvent(viewMode === "world" ? "Whole battlefield view restored." : `${TEAM_NAMES[viewMode]} tank located.`);
+  function resetInspectionView(announce = true) {
+    inspectionCamera.active = false;
+    inspectionCamera.zoom = 1;
+    inspectionCamera.targetX = null;
+    inspectionCamera.targetY = null;
+    inspectionCamera.dragging = false;
+    inspectionCamera.pointers.clear();
+    if (gameState) {
+      inspectionCamera.centerX = gameState.settings.worldWidth / 2;
+      inspectionCamera.centerY = WORLD_HEIGHT / 2;
     }
+    dom.canvasFrame.classList.remove("inspection-active");
+    dom.locatorButton.classList.remove("active");
+    dom.locatorButton.textContent = "⌖";
+    dom.locatorButton.title = "Inspect terrain";
+    dom.locatorButton.setAttribute("aria-label", "Inspect terrain");
+    dom.canvasViewLabel.textContent = "WHOLE BATTLEFIELD";
+    if (announce && gameState) addEvent("Whole battlefield view restored.");
   }
 
-  function cycleTankView() {
+  function toggleInspectionMode() {
     if (!gameState) return;
-    setViewMode(viewMode === "world" ? "blue" : viewMode === "blue" ? "red" : "world");
+    if (inspectionCamera.active) {
+      resetInspectionView(true);
+      playLocatorSound();
+      return;
+    }
+    inspectionCamera.active = true;
+    inspectionCamera.zoom = Math.max(2.4, inspectionCamera.zoom);
+    inspectionCamera.centerX = gameState.settings.worldWidth / 2;
+    inspectionCamera.centerY = WORLD_HEIGHT / 2;
+    inspectionCamera.targetX = inspectionCamera.centerX;
+    inspectionCamera.targetY = inspectionCamera.centerY;
+    dom.canvasFrame.classList.add("inspection-active");
+    dom.locatorButton.classList.add("active");
+    dom.locatorButton.textContent = "×";
+    dom.locatorButton.title = "Return to whole battlefield";
+    dom.locatorButton.setAttribute("aria-label", "Return to whole battlefield");
+    dom.canvasViewLabel.textContent = "INSPECT TERRAIN · DRAG · WHEEL OR PINCH";
+    playLocatorSound();
+    addEvent("Terrain inspection active. Drag to pan; wheel or pinch to zoom.");
+  }
+
+  function clampInspectionCenter() {
+    if (!gameState) return;
+    const bounds = rawInspectionBounds();
+    const halfX = (bounds.maxX - bounds.minX) / 2;
+    const halfY = (bounds.maxY - bounds.minY) / 2;
+    inspectionCamera.centerX = clamp(inspectionCamera.centerX, halfX, gameState.settings.worldWidth - halfX);
+    inspectionCamera.centerY = clamp(inspectionCamera.centerY, halfY, WORLD_HEIGHT - halfY);
+  }
+
+  function rawInspectionBounds() {
+    const worldWidth = gameState ? gameState.settings.worldWidth : 1;
+    const zoom = clamp(inspectionCamera.zoom, 1, 18);
+    return { minX: 0, maxX: worldWidth / zoom, minY: 0, maxY: WORLD_HEIGHT / zoom };
   }
 
   function currentViewBounds() {
-    if (!gameState || viewMode === "world") {
+    if (!gameState || !inspectionCamera.active) {
       return { minX: 0, maxX: gameState ? gameState.settings.worldWidth : 1, minY: 0, maxY: WORLD_HEIGHT };
     }
-    const tank = gameState.tanks[viewMode];
-    const worldWidth = gameState.settings.worldWidth;
-    const canvasWidth = Math.max(640, dom.canvas.width || 1280);
-    const canvasHeight = Math.max(360, dom.canvas.height || 720);
-    const xSpan = clamp(tankWorldWidth() * canvasWidth / 70, 12, Math.min(90, worldWidth));
-    const ySpan = clamp(tankWorldHeight() * canvasHeight / 28, 14, 60);
-    const ground = terrainAt(tank.x);
-    const minX = clamp(tank.x - xSpan / 2, 0, Math.max(0, worldWidth - xSpan));
-    const minY = clamp(ground - ySpan * .32, 0, WORLD_HEIGHT - ySpan);
-    return { minX, maxX: minX + Math.min(xSpan, worldWidth), minY, maxY: minY + ySpan };
+    const span = rawInspectionBounds();
+    const xSpan = span.maxX - span.minX;
+    const ySpan = span.maxY - span.minY;
+    const minX = clamp(inspectionCamera.centerX - xSpan / 2, 0, Math.max(0, gameState.settings.worldWidth - xSpan));
+    const minY = clamp(inspectionCamera.centerY - ySpan / 2, 0, Math.max(0, WORLD_HEIGHT - ySpan));
+    return { minX, maxX: minX + xSpan, minY, maxY: minY + ySpan };
+  }
+
+  function canvasToWorld(clientX, clientY) {
+    const rect = dom.canvas.getBoundingClientRect();
+    const bounds = currentViewBounds();
+    const px = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1);
+    const py = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1);
+    return {
+      x: bounds.minX + px * (bounds.maxX - bounds.minX),
+      y: bounds.maxY - py * (bounds.maxY - bounds.minY)
+    };
+  }
+
+  function setInspectionTarget(clientX, clientY) {
+    const point = canvasToWorld(clientX, clientY);
+    inspectionCamera.targetX = point.x;
+    inspectionCamera.targetY = point.y;
+    inspectionCamera.centerX = point.x;
+    inspectionCamera.centerY = point.y;
+    clampInspectionCenter();
+  }
+
+  function handleCanvasPointerDown(event) {
+    if (!inspectionCamera.active || !gameState) return;
+    dom.canvas.setPointerCapture?.(event.pointerId);
+    inspectionCamera.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    inspectionCamera.dragging = true;
+    inspectionCamera.lastClientX = event.clientX;
+    inspectionCamera.lastClientY = event.clientY;
+    if (inspectionCamera.pointers.size === 1) setInspectionTarget(event.clientX, event.clientY);
+    if (inspectionCamera.pointers.size === 2) {
+      const points = [...inspectionCamera.pointers.values()];
+      inspectionCamera.pinchDistance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      inspectionCamera.pinchZoom = inspectionCamera.zoom;
+    }
+    event.preventDefault();
+  }
+
+  function handleCanvasPointerMove(event) {
+    if (!inspectionCamera.active || !inspectionCamera.pointers.has(event.pointerId) || !gameState) return;
+    const previous = inspectionCamera.pointers.get(event.pointerId);
+    inspectionCamera.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (inspectionCamera.pointers.size >= 2) {
+      const points = [...inspectionCamera.pointers.values()].slice(0, 2);
+      const distance = Math.max(20, Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y));
+      if (inspectionCamera.pinchDistance > 0) inspectionCamera.zoom = clamp(inspectionCamera.pinchZoom * distance / inspectionCamera.pinchDistance, 1.2, 18);
+      const midX = (points[0].x + points[1].x) / 2;
+      const midY = (points[0].y + points[1].y) / 2;
+      setInspectionTarget(midX, midY);
+    } else {
+      const bounds = currentViewBounds();
+      const rect = dom.canvas.getBoundingClientRect();
+      const dxWorld = (event.clientX - previous.x) / Math.max(1, rect.width) * (bounds.maxX - bounds.minX);
+      const dyWorld = (event.clientY - previous.y) / Math.max(1, rect.height) * (bounds.maxY - bounds.minY);
+      inspectionCamera.centerX -= dxWorld;
+      inspectionCamera.centerY += dyWorld;
+      inspectionCamera.targetX = inspectionCamera.centerX;
+      inspectionCamera.targetY = inspectionCamera.centerY;
+      clampInspectionCenter();
+    }
+    inspectionCamera.lastClientX = event.clientX;
+    inspectionCamera.lastClientY = event.clientY;
+    event.preventDefault();
+  }
+
+  function handleCanvasPointerUp(event) {
+    inspectionCamera.pointers.delete(event.pointerId);
+    inspectionCamera.dragging = inspectionCamera.pointers.size > 0;
+    if (inspectionCamera.pointers.size < 2) inspectionCamera.pinchDistance = 0;
+  }
+
+  function handleCanvasWheel(event) {
+    if (!inspectionCamera.active || !gameState) return;
+    event.preventDefault();
+    const before = canvasToWorld(event.clientX, event.clientY);
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    inspectionCamera.zoom = clamp(inspectionCamera.zoom * factor, 1.2, 18);
+    const after = canvasToWorld(event.clientX, event.clientY);
+    inspectionCamera.centerX += before.x - after.x;
+    inspectionCamera.centerY += before.y - after.y;
+    inspectionCamera.targetX = before.x;
+    inspectionCamera.targetY = before.y;
+    clampInspectionCenter();
   }
 
   function resizeCanvasToDisplaySize() {
@@ -1693,9 +1851,16 @@
     tone(880, .28, "triangle", .04, .47);
   }
 
-  function playChatSound() {
-    tone(620, .08, "sine", .025);
-    tone(810, .09, "sine", .018, .06);
+  function playOutgoingChatSound() {
+    tone(980, .035, "square", .018);
+    tone(420, .045, "square", .012, .035);
+  }
+
+  function playIncomingChatSound() {
+    noiseBurst(.055, .012);
+    tone(760, .07, "square", .032);
+    tone(1040, .09, "square", .028, .075);
+    tone(620, .12, "triangle", .022, .16);
   }
 
   function canvasMetrics() {
@@ -1738,10 +1903,11 @@
     drawSky(now);
     drawDistantLandscape();
     drawTerrain();
+    drawTankPads();
     drawAimGuide();
     drawTank("blue", now);
     drawTank("red", now);
-    drawLocatorReticle(now);
+    drawInspectionReticle(now);
     drawProjectileAnimation(now);
     drawVignette();
   }
@@ -1750,26 +1916,17 @@
     const width = dom.canvas.width;
     const height = dom.canvas.height;
     const location = gameState.settings.location;
-    let top;
-    let bottom;
-
-    if (location === "earth") {
-      top = "#337fbd";
-      bottom = "#a7d8ec";
-    } else if (location === "mars") {
-      top = "#7d2d28";
-      bottom = "#e69b6f";
-    } else if (location === "moon") {
-      top = "#030711";
-      bottom = "#101827";
-    } else {
-      top = "#09051a";
-      bottom = "#21133d";
-    }
-
+    const palettes = {
+      earth: ["#263746", "#65727a", "#a29d8e"],
+      mars: ["#4b2925", "#8a5545", "#b28366"],
+      moon: ["#020407", "#0c1118", "#252a2e"],
+      space: ["#020307", "#090c16", "#151321"]
+    };
+    const colors = palettes[location];
     const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, top);
-    gradient.addColorStop(1, bottom);
+    gradient.addColorStop(0, colors[0]);
+    gradient.addColorStop(.58, colors[1]);
+    gradient.addColorStop(1, colors[2]);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
 
@@ -1777,34 +1934,51 @@
     if (location === "mars") drawMarsSky();
     if (location === "moon") drawMoonSky();
     if (location === "space") drawSpaceSky(now);
+
+    // Fine atmospheric grain prevents the sky looking like a flat cartoon wash.
+    const random = mulberry32(gameState.seed ^ 0xa5a5a5a5);
+    ctx.save();
+    ctx.globalAlpha = location === "earth" || location === "mars" ? .045 : .025;
+    for (let i = 0; i < 340; i += 1) {
+      const shade = 90 + Math.floor(random() * 120);
+      ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
+      ctx.fillRect(random() * width, random() * height, 1 + random() * 1.5, 1 + random());
+    }
+    ctx.restore();
   }
 
   function drawEarthSky(now) {
     const width = dom.canvas.width;
     const height = dom.canvas.height;
     ctx.save();
-    const sun = ctx.createRadialGradient(width * .79, height * .17, 5, width * .79, height * .17, 82);
-    sun.addColorStop(0, "rgba(255,248,190,.95)");
-    sun.addColorStop(.23, "rgba(255,224,132,.75)");
-    sun.addColorStop(1, "rgba(255,224,132,0)");
-    ctx.fillStyle = sun;
+    const haze = ctx.createRadialGradient(width * .76, height * .2, 12, width * .76, height * .2, height * .36);
+    haze.addColorStop(0, "rgba(225,215,184,.34)");
+    haze.addColorStop(.32, "rgba(193,188,166,.13)");
+    haze.addColorStop(1, "rgba(180,180,170,0)");
+    ctx.fillStyle = haze;
     ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = "rgba(255,255,255,.28)";
-    for (let i = 0; i < 5; i += 1) {
-      const x = ((i * 310 + now * .006) % (width + 220)) - 110;
-      const y = 95 + (i % 3) * 54;
-      drawCloud(x, y, .8 + (i % 2) * .22);
+    const random = mulberry32(gameState.seed ^ 0x1f123bb5);
+    for (let band = 0; band < 6; band += 1) {
+      const yBase = height * (.12 + band * .075);
+      const bandHeight = 10 + random() * 20;
+      const drift = (now * (.001 + band * .00012)) % 80;
+      ctx.globalAlpha = .055 + band * .012;
+      ctx.fillStyle = band < 2 ? "#d0d0c8" : "#aeb3b5";
+      ctx.beginPath();
+      ctx.moveTo(-30, yBase + bandHeight);
+      for (let x = -30; x <= width + 60; x += 42) {
+        const y = yBase + Math.sin((x + drift) * .017 + band) * (4 + band * .8) + (random() - .5) * 9;
+        ctx.lineTo(x, y);
+      }
+      for (let x = width + 60; x >= -30; x -= 42) {
+        const y = yBase + bandHeight + Math.sin((x + drift) * .014 + band * 1.3) * (4 + band * .6) + (random() - .5) * 8;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
     }
     ctx.restore();
-  }
-
-  function drawCloud(x, y, scale) {
-    ctx.beginPath();
-    ctx.ellipse(x, y, 48 * scale, 16 * scale, 0, 0, Math.PI * 2);
-    ctx.ellipse(x + 34 * scale, y - 8 * scale, 34 * scale, 22 * scale, 0, 0, Math.PI * 2);
-    ctx.ellipse(x - 31 * scale, y - 5 * scale, 28 * scale, 19 * scale, 0, 0, Math.PI * 2);
-    ctx.fill();
   }
 
   function drawMarsSky() {
@@ -1893,35 +2067,52 @@
     const location = gameState.settings.location;
     const width = dom.canvas.width;
     const height = dom.canvas.height;
+    const random = mulberry32(gameState.seed ^ 0x6d2b79f5);
+    const layers = location === "earth" ? 3 : 2;
     ctx.save();
-    ctx.globalAlpha = location === "earth" ? .18 : .25;
-    ctx.fillStyle = location === "earth" ? "#345869" : location === "mars" ? "#6c332b" : "#4a5060";
-    ctx.beginPath();
-    ctx.moveTo(0, height * .72);
-    for (let x = 0; x <= width; x += 80) {
-      const y = height * (.55 + .09 * Math.sin(x * .009 + gameState.seed * .00003));
-      ctx.lineTo(x, y);
+    for (let layer = 0; layer < layers; layer += 1) {
+      const baseline = height * (.65 + layer * .07);
+      const amplitude = height * (.07 + layer * .025);
+      ctx.globalAlpha = .16 - layer * .035;
+      ctx.fillStyle = location === "earth" ? ["#202b2d", "#293337", "#3a4140"][layer] : location === "mars" ? ["#432a26", "#5a3930"][layer] : ["#292d31", "#3b3d40"][layer];
+      ctx.beginPath();
+      ctx.moveTo(0, height);
+      ctx.lineTo(0, baseline);
+      for (let x = 0; x <= width + 60; x += 38) {
+        const jag = (random() - .5) * amplitude * .38;
+        const y = baseline - Math.abs(Math.sin(x * (.006 + layer * .0015) + gameState.seed * .00002)) * amplitude + jag;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(width, height);
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.lineTo(width, height);
-    ctx.lineTo(0, height);
-    ctx.closePath();
-    ctx.fill();
     ctx.restore();
+  }
+
+  function terrainSurfacePath() {
+    ctx.beginPath();
+    gameState.terrain.forEach((heightValue, index) => {
+      const worldX = index / (gameState.terrain.length - 1) * gameState.settings.worldWidth;
+      const point = worldToCanvas(worldX, heightValue);
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
   }
 
   function drawTerrain() {
     const metrics = canvasMetrics();
     const location = gameState.settings.location;
     const colors = {
-      earth: ["#55784d", "#253e2d", "#15241c"],
-      mars: ["#a65236", "#663024", "#351b18"],
-      moon: ["#858b93", "#3e444d", "#242932"],
-      space: ["#756579", "#40364d", "#241b30"]
+      earth: ["#50513c", "#313425", "#171a14"],
+      mars: ["#784c37", "#4b2f27", "#241918"],
+      moon: ["#777a76", "#424542", "#202322"],
+      space: ["#5f565c", "#393139", "#1b171d"]
     }[location];
 
-    const gradient = ctx.createLinearGradient(0, metrics.height * .45, 0, metrics.height);
+    const gradient = ctx.createLinearGradient(0, metrics.height * .38, 0, metrics.height);
     gradient.addColorStop(0, colors[0]);
-    gradient.addColorStop(.45, colors[1]);
+    gradient.addColorStop(.34, colors[1]);
     gradient.addColorStop(1, colors[2]);
 
     ctx.beginPath();
@@ -1936,30 +2127,102 @@
     ctx.fillStyle = gradient;
     ctx.fill();
 
+    // Geological strata and fractures clipped inside the terrain.
+    ctx.save();
     ctx.beginPath();
+    ctx.moveTo(0, metrics.height);
     gameState.terrain.forEach((heightValue, index) => {
       const worldX = index / (gameState.terrain.length - 1) * gameState.settings.worldWidth;
       const point = worldToCanvas(worldX, heightValue);
-      if (index === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
+      ctx.lineTo(point.x, point.y);
     });
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = location === "earth" ? "#8faf6e" : location === "mars" ? "#d27a53" : "#b0b4ba";
-    ctx.stroke();
+    ctx.lineTo(metrics.width, metrics.height);
+    ctx.closePath();
+    ctx.clip();
 
     const random = mulberry32(gameState.seed ^ 0x85ebca6b);
-    ctx.globalAlpha = .16;
-    ctx.fillStyle = "#ffffff";
-    for (let i = 0; i < 95; i += 1) {
+    ctx.lineCap = "round";
+    for (let layer = 0; layer < 8; layer += 1) {
+      ctx.globalAlpha = .055 + layer * .008;
+      ctx.strokeStyle = layer % 2 ? "#d5c7aa" : "#090b0a";
+      ctx.lineWidth = .6 + random() * 1.2;
+      ctx.beginPath();
+      const yBase = metrics.height * (.56 + layer * .058);
+      for (let x = -20; x <= metrics.width + 20; x += 30) {
+        const y = yBase + Math.sin(x * .018 + layer * 1.7) * (4 + layer) + (random() - .5) * 7;
+        if (x === -20) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = .18;
+    for (let i = 0; i < 260; i += 1) {
       const xWorld = random() * gameState.settings.worldWidth;
       const ground = terrainAt(xWorld);
-      const depth = 1 + random() * 12;
+      const depth = 1.4 + random() * 17;
       const p = worldToCanvas(xWorld, Math.max(1, ground - depth));
+      const size = .45 + random() * 2.2;
+      ctx.fillStyle = random() > .55 ? "#0d100e" : "#b4aa91";
       ctx.beginPath();
-      ctx.arc(p.x, p.y, .7 + random() * 1.7, 0, Math.PI * 2);
+      ctx.ellipse(p.x, p.y, size * (1.2 + random()), size, random() * Math.PI, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.globalAlpha = 1;
+
+    ctx.globalAlpha = .13;
+    ctx.strokeStyle = "#050606";
+    for (let i = 0; i < 58; i += 1) {
+      const xWorld = random() * gameState.settings.worldWidth;
+      const ground = terrainAt(xWorld);
+      const p = worldToCanvas(xWorld, ground - 2 - random() * 13);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + (random() - .5) * 18, p.y + 8 + random() * 28);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    terrainSurfacePath();
+    ctx.lineWidth = Math.max(1.2, Math.min(3, metrics.sy * .24));
+    ctx.strokeStyle = location === "earth" ? "#74745b" : location === "mars" ? "#9a6447" : "#999a94";
+    ctx.stroke();
+    terrainSurfacePath();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(10,12,10,.72)";
+    ctx.stroke();
+  }
+
+  function drawTankPads() {
+    if (!gameState?.spawnPositions) return;
+    const radius = Math.max(6.5, 9.2 * (gameState.settings.tankSize / 100));
+    const random = mulberry32(gameState.seed ^ 0xc2b2ae35);
+    ctx.save();
+    for (const team of ["blue", "red"]) {
+      const centerX = gameState.spawnPositions[team];
+      const ground = terrainAt(centerX);
+      const originalGround = terrainAt(centerX, { ...gameState, terrain: gameState.baseTerrain });
+      if (Math.abs(ground - originalGround) > 1.5) continue;
+      const left = worldToCanvas(centerX - radius * .64, ground + .03);
+      const right = worldToCanvas(centerX + radius * .64, ground + .03);
+      const thickness = Math.max(2, Math.min(7, canvasMetrics().sy * .55));
+      ctx.strokeStyle = "rgba(20,20,17,.72)";
+      ctx.lineWidth = thickness + 2;
+      ctx.beginPath();
+      ctx.moveTo(left.x, left.y);
+      ctx.lineTo(right.x, right.y);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(91,88,72,.62)";
+      ctx.lineWidth = thickness;
+      ctx.stroke();
+      ctx.globalAlpha = .4;
+      ctx.fillStyle = "#10110e";
+      for (let i = 0; i < 8; i += 1) {
+        const t = i / 7;
+        const x = left.x + (right.x - left.x) * t + (random() - .5) * 5;
+        ctx.fillRect(x, left.y - 1 + (random() - .5) * 2, 1 + random() * 2, 1 + random() * 1.5);
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
   }
 
   function drawTank(team, now) {
@@ -1971,183 +2234,202 @@
     const bodyHeight = Math.max(0.28, tankWorldHeight() * metrics.sy);
     const slope = terrainSlopeAt(tank.x);
     const bodyAngle = clamp(-Math.atan(slope * metrics.sy / metrics.sx), -1.08, 1.08);
-    const color = team === "blue" ? "#4fa4ff" : "#ff5c63";
-    const light = team === "blue" ? "#91d2ff" : "#ffabb0";
-    const mid = team === "blue" ? "#287bc8" : "#d83b48";
-    const dark = team === "blue" ? "#123f72" : "#711b26";
-    const detail = bodyWidth >= 11 && bodyHeight >= 5;
+    const accent = team === "blue" ? "#486f86" : "#7d4743";
+    const accentLight = team === "blue" ? "#7192a3" : "#a0665f";
+    const steel = "#434840";
+    const steelLight = "#666b61";
+    const steelDark = "#1e221f";
+    const detail = bodyWidth >= 9 && bodyHeight >= 4;
+    const fineDetail = bodyWidth >= 18 && bodyHeight >= 8;
 
     const center = tankCenter(gameState, team);
     const turretPoint = worldToCanvas(center.x, center.y);
     const barrelAngle = -(tank.angle * Math.PI / 180);
-    const barrelLength = bodyWidth * .94;
-    const barrelThickness = Math.max(.55, bodyHeight * .16);
+    const barrelLength = bodyWidth * 1.08;
+    const barrelThickness = Math.max(.55, bodyHeight * .13);
 
-    // Barrel and muzzle brake sit behind the turret.
+    // Long steel barrel with a squared mantlet and muzzle brake.
     ctx.save();
     ctx.translate(turretPoint.x, turretPoint.y);
     ctx.rotate(barrelAngle);
-    const barrelGradient = ctx.createLinearGradient(0, 0, barrelLength, 0);
-    barrelGradient.addColorStop(0, dark);
-    barrelGradient.addColorStop(.55, mid);
-    barrelGradient.addColorStop(1, light);
+    const barrelGradient = ctx.createLinearGradient(0, -barrelThickness, 0, barrelThickness);
+    barrelGradient.addColorStop(0, steelLight);
+    barrelGradient.addColorStop(.45, steel);
+    barrelGradient.addColorStop(1, steelDark);
     ctx.fillStyle = barrelGradient;
-    roundedRect(ctx, bodyHeight * .05, -barrelThickness / 2, barrelLength, barrelThickness, barrelThickness / 2);
-    ctx.fill();
-    if (detail) {
-      ctx.fillStyle = "#18212c";
-      roundedRect(ctx, barrelLength * .88, -barrelThickness * .78, barrelLength * .17, barrelThickness * 1.56, barrelThickness * .3);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,.24)";
-      ctx.fillRect(barrelLength * .18, -barrelThickness * .32, barrelLength * .52, Math.max(.55, barrelThickness * .16));
-    }
+    ctx.fillRect(bodyHeight * .04, -barrelThickness / 2, barrelLength, barrelThickness);
+    ctx.fillStyle = "#171a18";
+    ctx.fillRect(barrelLength * .91, -barrelThickness * .85, barrelLength * .14, barrelThickness * 1.7);
+    ctx.fillStyle = "rgba(220,220,205,.17)";
+    ctx.fillRect(barrelLength * .12, -barrelThickness * .34, barrelLength * .55, Math.max(.45, barrelThickness * .12));
     ctx.restore();
 
     ctx.save();
-    ctx.translate(groundPoint.x, groundPoint.y - bodyHeight * .43);
+    ctx.translate(groundPoint.x, groundPoint.y - bodyHeight * .39);
     ctx.rotate(bodyAngle);
 
-    // Ground shadow.
-    ctx.fillStyle = "rgba(0,0,0,.30)";
+    ctx.fillStyle = "rgba(0,0,0,.46)";
     ctx.beginPath();
-    ctx.ellipse(0, bodyHeight * .71, bodyWidth * .63, bodyHeight * .24, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, bodyHeight * .72, bodyWidth * .66, bodyHeight * .21, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Caterpillar track assembly.
-    const trackY = bodyHeight * .12;
-    const trackHeight = bodyHeight * .48;
-    ctx.fillStyle = "#111821";
-    roundedRect(ctx, -bodyWidth * .57, trackY, bodyWidth * 1.14, trackHeight, trackHeight * .43);
+    // Track housing: angular rather than toy-like rounded lozenges.
+    const trackTop = bodyHeight * .12;
+    const trackBottom = bodyHeight * .61;
+    ctx.fillStyle = "#111411";
+    ctx.beginPath();
+    ctx.moveTo(-bodyWidth * .57, trackTop + bodyHeight * .12);
+    ctx.lineTo(-bodyWidth * .48, trackTop);
+    ctx.lineTo(bodyWidth * .48, trackTop);
+    ctx.lineTo(bodyWidth * .58, trackTop + bodyHeight * .13);
+    ctx.lineTo(bodyWidth * .50, trackBottom);
+    ctx.lineTo(-bodyWidth * .50, trackBottom);
+    ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = "rgba(210,225,240,.28)";
-    ctx.lineWidth = Math.max(.45, bodyHeight * .045);
+    ctx.strokeStyle = "#5f625a";
+    ctx.lineWidth = Math.max(.45, bodyHeight * .035);
     ctx.stroke();
 
     if (detail) {
-      const wheelY = trackY + trackHeight * .52;
-      const wheelRadius = trackHeight * .25;
-      for (let i = 0; i < 5; i += 1) {
-        const wheelX = -bodyWidth * .39 + i * bodyWidth * .195;
-        ctx.fillStyle = i === 0 || i === 4 ? "#2b3440" : "#364251";
+      const wheelY = bodyHeight * .39;
+      const wheelRadius = bodyHeight * .18;
+      for (let i = 0; i < 6; i += 1) {
+        const wheelX = -bodyWidth * .40 + i * bodyWidth * .16;
+        ctx.fillStyle = i === 0 || i === 5 ? "#343934" : "#454b44";
         ctx.beginPath();
         ctx.arc(wheelX, wheelY, wheelRadius, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,.18)";
+        ctx.strokeStyle = "#777a70";
+        ctx.lineWidth = Math.max(.35, bodyHeight * .025);
         ctx.stroke();
-        ctx.fillStyle = "#111821";
+        ctx.fillStyle = "#171a17";
         ctx.beginPath();
         ctx.arc(wheelX, wheelY, wheelRadius * .38, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.strokeStyle = "rgba(255,255,255,.16)";
-      ctx.lineWidth = Math.max(.45, bodyHeight * .04);
-      for (let i = 0; i < 9; i += 1) {
-        const treadX = -bodyWidth * .47 + i * bodyWidth * .118;
+      ctx.strokeStyle = "rgba(180,184,170,.23)";
+      ctx.lineWidth = Math.max(.35, bodyHeight * .025);
+      for (let i = 0; i < 12; i += 1) {
+        const x = -bodyWidth * .50 + i * bodyWidth * .091;
         ctx.beginPath();
-        ctx.moveTo(treadX, trackY + trackHeight * .08);
-        ctx.lineTo(treadX + bodyWidth * .025, trackY + trackHeight * .27);
+        ctx.moveTo(x, trackTop + bodyHeight * .03);
+        ctx.lineTo(x + bodyWidth * .018, trackTop + bodyHeight * .15);
         ctx.stroke();
       }
     }
 
-    // Sloped armoured hull.
-    const hullGradient = ctx.createLinearGradient(0, -bodyHeight * .43, 0, bodyHeight * .23);
-    hullGradient.addColorStop(0, light);
-    hullGradient.addColorStop(.33, color);
-    hullGradient.addColorStop(1, dark);
-    ctx.fillStyle = hullGradient;
+    // Low, sloped hull with muted team identification panel.
+    const hull = ctx.createLinearGradient(0, -bodyHeight * .42, 0, bodyHeight * .2);
+    hull.addColorStop(0, steelLight);
+    hull.addColorStop(.42, steel);
+    hull.addColorStop(1, steelDark);
+    ctx.fillStyle = hull;
     ctx.beginPath();
-    ctx.moveTo(-bodyWidth * .50, bodyHeight * .18);
-    ctx.lineTo(-bodyWidth * .37, -bodyHeight * .25);
-    ctx.lineTo(bodyWidth * .30, -bodyHeight * .31);
-    ctx.lineTo(bodyWidth * .52, -bodyHeight * .03);
-    ctx.lineTo(bodyWidth * .43, bodyHeight * .22);
+    ctx.moveTo(-bodyWidth * .48, bodyHeight * .16);
+    ctx.lineTo(-bodyWidth * .36, -bodyHeight * .24);
+    ctx.lineTo(bodyWidth * .31, -bodyHeight * .28);
+    ctx.lineTo(bodyWidth * .51, -bodyHeight * .02);
+    ctx.lineTo(bodyWidth * .42, bodyHeight * .20);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,.28)";
-    ctx.lineWidth = Math.max(.45, bodyHeight * .045);
+    ctx.strokeStyle = "#151815";
+    ctx.lineWidth = Math.max(.55, bodyHeight * .05);
     ctx.stroke();
 
-    // Side armour plate and team marking.
-    if (detail) {
-      ctx.fillStyle = "rgba(9,18,29,.23)";
-      roundedRect(ctx, -bodyWidth * .28, -bodyHeight * .08, bodyWidth * .54, bodyHeight * .20, bodyHeight * .05);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,.16)";
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.moveTo(-bodyWidth * .28, -bodyHeight * .10);
+    ctx.lineTo(bodyWidth * .25, -bodyHeight * .12);
+    ctx.lineTo(bodyWidth * .31, bodyHeight * .07);
+    ctx.lineTo(-bodyWidth * .30, bodyHeight * .09);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = .5;
+    ctx.strokeStyle = accentLight;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    if (fineDetail) {
+      // Bolts, seams, scratches and dried mud.
+      ctx.strokeStyle = "rgba(15,17,14,.65)";
+      ctx.lineWidth = Math.max(.4, bodyHeight * .026);
+      ctx.beginPath();
+      ctx.moveTo(-bodyWidth * .30, -bodyHeight * .04);
+      ctx.lineTo(bodyWidth * .27, -bodyHeight * .05);
       ctx.stroke();
-
-      ctx.save();
-      ctx.translate(team === "blue" ? -bodyWidth * .04 : bodyWidth * .04, bodyHeight * .015);
-      ctx.fillStyle = "rgba(255,255,255,.82)";
-      ctx.beginPath();
-      if (team === "blue") {
-        ctx.moveTo(-bodyHeight * .11, bodyHeight * .08);
-        ctx.lineTo(0, -bodyHeight * .11);
-        ctx.lineTo(bodyHeight * .11, bodyHeight * .08);
-        ctx.lineTo(0, bodyHeight * .02);
-      } else {
-        ctx.moveTo(-bodyHeight * .12, -bodyHeight * .04);
-        ctx.lineTo(bodyHeight * .12, -bodyHeight * .04);
-        ctx.lineTo(0, bodyHeight * .12);
+      ctx.fillStyle = "#a2a08e";
+      for (const x of [-.29, -.12, .05, .22]) {
+        ctx.beginPath();
+        ctx.arc(bodyWidth * x, bodyHeight * .015, Math.max(.55, bodyHeight * .022), 0, Math.PI * 2);
+        ctx.fill();
       }
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      ctx.fillStyle = "rgba(255,255,255,.3)";
-      ctx.beginPath();
-      ctx.arc(-bodyWidth * .39, bodyHeight * .04, bodyHeight * .035, 0, Math.PI * 2);
-      ctx.arc(bodyWidth * .37, bodyHeight * .02, bodyHeight * .035, 0, Math.PI * 2);
-      ctx.fill();
+      const random = mulberry32(gameState.seed ^ (team === "blue" ? 0x22334455 : 0x88442211));
+      ctx.strokeStyle = "rgba(218,209,183,.25)";
+      ctx.lineWidth = Math.max(.35, bodyHeight * .02);
+      for (let i = 0; i < 13; i += 1) {
+        const x = (random() - .5) * bodyWidth * .78;
+        const y = -bodyHeight * .18 + random() * bodyHeight * .31;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + (random() - .5) * bodyWidth * .12, y + (random() - .5) * bodyHeight * .06);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(82,58,38,.46)";
+      for (let i = 0; i < 10; i += 1) {
+        ctx.beginPath();
+        ctx.arc((random() - .5) * bodyWidth * .9, bodyHeight * (.18 + random() * .32), 1 + random() * bodyHeight * .05, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
 
-    // Turret dome, mantlet, hatch and aerial.
-    const turretRadius = Math.max(.28, bodyHeight * .38);
+    // Angular turret and cupola.
+    const turretW = Math.max(.5, bodyWidth * .42);
+    const turretH = Math.max(.35, bodyHeight * .46);
     ctx.save();
     ctx.translate(turretPoint.x, turretPoint.y);
-    const turretGradient = ctx.createRadialGradient(-turretRadius * .35, -turretRadius * .5, 0, 0, 0, turretRadius * 1.2);
-    turretGradient.addColorStop(0, light);
-    turretGradient.addColorStop(.45, color);
-    turretGradient.addColorStop(1, dark);
+    const turretGradient = ctx.createLinearGradient(0, -turretH, 0, turretH * .35);
+    turretGradient.addColorStop(0, steelLight);
+    turretGradient.addColorStop(.55, steel);
+    turretGradient.addColorStop(1, steelDark);
     ctx.fillStyle = turretGradient;
     ctx.beginPath();
-    ctx.ellipse(0, 0, turretRadius * 1.14, turretRadius, 0, Math.PI, Math.PI * 2);
-    ctx.lineTo(turretRadius * .93, turretRadius * .34);
-    ctx.lineTo(-turretRadius * .93, turretRadius * .34);
+    ctx.moveTo(-turretW * .52, turretH * .25);
+    ctx.lineTo(-turretW * .40, -turretH * .47);
+    ctx.lineTo(turretW * .28, -turretH * .52);
+    ctx.lineTo(turretW * .52, -turretH * .14);
+    ctx.lineTo(turretW * .46, turretH * .28);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,.3)";
-    ctx.lineWidth = Math.max(.45, bodyHeight * .045);
+    ctx.strokeStyle = "#141714";
+    ctx.lineWidth = Math.max(.5, bodyHeight * .045);
     ctx.stroke();
 
-    ctx.fillStyle = dark;
-    ctx.beginPath();
-    ctx.arc(Math.cos(-barrelAngle) * 0, 0, turretRadius * .27, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = accent;
+    ctx.fillRect(-turretW * .30, -turretH * .22, turretW * .46, turretH * .22);
+    ctx.fillStyle = "#171a18";
+    ctx.fillRect(turretW * .34, -turretH * .16, turretW * .20, turretH * .34);
 
     if (detail) {
-      ctx.fillStyle = "#1b2634";
-      roundedRect(ctx, -turretRadius * .34, -turretRadius * .88, turretRadius * .68, turretRadius * .22, turretRadius * .08);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,.25)";
-      ctx.stroke();
-
-      ctx.strokeStyle = "#2b3340";
-      ctx.lineWidth = Math.max(.55, bodyHeight * .045);
+      ctx.fillStyle = "#252a25";
+      ctx.fillRect(-turretW * .18, -turretH * .70, turretW * .33, turretH * .16);
+      ctx.strokeStyle = "#111411";
+      ctx.strokeRect(-turretW * .18, -turretH * .70, turretW * .33, turretH * .16);
+      ctx.strokeStyle = "#363b35";
+      ctx.lineWidth = Math.max(.45, bodyHeight * .035);
       ctx.beginPath();
-      ctx.moveTo(-turretRadius * .55, -turretRadius * .7);
-      ctx.lineTo(-turretRadius * .72, -turretRadius * 2.1);
+      ctx.moveTo(-turretW * .33, -turretH * .50);
+      ctx.lineTo(-turretW * .43, -turretH * 1.65);
       ctx.stroke();
-      ctx.fillStyle = team === "blue" ? "#8dd4ff" : "#ffb1b5";
+      ctx.fillStyle = team === "blue" ? "#617f8f" : "#8b5650";
       ctx.beginPath();
-      ctx.arc(-turretRadius * .72, -turretRadius * 2.1, Math.max(.75, turretRadius * .08), 0, Math.PI * 2);
+      ctx.arc(-turretW * .43, -turretH * 1.65, Math.max(.65, bodyHeight * .035), 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
 
     if (tank.hits > 0 && tank.alive) drawTankSmoke(turretPoint.x, turretPoint.y, tank.hits, now);
-    if (!tank.alive) drawDestroyedTank(turretPoint.x, turretPoint.y, color, now);
+    if (!tank.alive) drawDestroyedTank(turretPoint.x, turretPoint.y, accent, now);
   }
 
   function roundedRect(context, x, y, width, height, radius) {
@@ -2194,27 +2476,28 @@
     ctx.restore();
   }
 
-  function drawLocatorReticle(now) {
-    if (viewMode === "world" || !gameState) return;
-    const center = tankCenter(gameState, viewMode);
-    const point = worldToCanvas(center.x, center.y);
-    const pulse = 32 + Math.sin(now * .006) * 5;
+  function drawInspectionReticle(now) {
+    if (!inspectionCamera.active || !gameState || !Number.isFinite(inspectionCamera.targetX)) return;
+    const point = worldToCanvas(inspectionCamera.targetX, inspectionCamera.targetY);
+    const pulse = 16 + Math.sin(now * .007) * 2;
     ctx.save();
-    ctx.strokeStyle = viewMode === "blue" ? "rgba(143,199,255,.92)" : "rgba(255,157,162,.92)";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([7, 6]);
+    ctx.strokeStyle = "rgba(226, 231, 224, .82)";
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([4, 5]);
     ctx.beginPath();
     ctx.arc(point.x, point.y, pulse, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = "rgba(5,10,18,.7)";
-    roundedRect(ctx, point.x - 38, point.y - pulse - 28, 76, 20, 7);
-    ctx.fill();
-    ctx.fillStyle = "white";
-    ctx.font = "900 10px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${TEAM_NAMES[viewMode].toUpperCase()} TANK`, point.x, point.y - pulse - 18);
+    ctx.beginPath();
+    ctx.moveTo(point.x - pulse - 9, point.y);
+    ctx.lineTo(point.x - 5, point.y);
+    ctx.moveTo(point.x + 5, point.y);
+    ctx.lineTo(point.x + pulse + 9, point.y);
+    ctx.moveTo(point.x, point.y - pulse - 9);
+    ctx.lineTo(point.x, point.y - 5);
+    ctx.moveTo(point.x, point.y + 5);
+    ctx.lineTo(point.x, point.y + pulse + 9);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -2355,11 +2638,41 @@
     ctx.fillRect(0, 0, width, height);
   }
 
+  function togglePanel(panel, forceCollapsed = null) {
+    if (!panel) return;
+    const collapsed = forceCollapsed === null ? !panel.classList.contains("collapsed") : forceCollapsed;
+    panel.classList.toggle("collapsed", collapsed);
+    const button = panel.querySelector(".collapse-button");
+    if (button) {
+      button.textContent = collapsed ? "+" : "−";
+      const name = panel.dataset.panel || "panel";
+      button.title = collapsed ? "Expand panel" : "Collapse panel";
+      button.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${name}`);
+      button.setAttribute("aria-expanded", String(!collapsed));
+    }
+    requestAnimationFrame(resizeCanvasToDisplaySize);
+  }
+
+  function fitPanelsToViewport() {
+    if (dom.gameScreen.classList.contains("hidden")) return;
+    const short = window.innerHeight < 760;
+    const narrow = window.innerWidth < 1050;
+    document.querySelectorAll(".collapsible-panel").forEach(panel => {
+      if (!panel.dataset.autoPrepared) {
+        panel.dataset.autoPrepared = "true";
+        if (panel.dataset.panel === "log") togglePanel(panel, true);
+        if (short && panel.dataset.panel === "telemetry") togglePanel(panel, true);
+        if ((short || narrow) && panel.dataset.panel === "battlefield") togglePanel(panel, true);
+        if (window.innerWidth <= 720 && panel.dataset.panel === "chat") togglePanel(panel, true);
+      }
+    });
+  }
+
   function toggleSound() {
     soundEnabled = !soundEnabled;
     dom.soundButton.classList.toggle("active", soundEnabled);
     dom.soundButton.textContent = soundEnabled ? "♪" : "×";
-    if (soundEnabled) playChatSound();
+    if (soundEnabled) playIncomingChatSound();
   }
 
   function updateAimOutputs() {
@@ -2405,11 +2718,13 @@
   dom.fireButton.addEventListener("click", requestFire);
   dom.chatForm.addEventListener("submit", submitChat);
   dom.soundButton.addEventListener("click", toggleSound);
-  dom.locatorButton.addEventListener("click", cycleTankView);
+  dom.locatorButton.addEventListener("click", toggleInspectionMode);
   dom.fullscreenButton.addEventListener("click", toggleFullscreen);
   dom.restartRoundButton.addEventListener("click", () => requestRoundAction("restart"));
   dom.regenerateMapButton.addEventListener("click", () => requestRoundAction("regenerate"));
   dom.replayRequestButton.addEventListener("click", () => requestRoundAction("replay"));
+  dom.returnMenuButton.addEventListener("click", resetAll);
+  dom.modalCloseButton.addEventListener("click", dismissEndModal);
   dom.replayAcceptButton.addEventListener("click", acceptActionRequest);
   dom.replayDeclineButton.addEventListener("click", declineActionRequest);
   dom.leaveGameButton.addEventListener("click", resetAll);
@@ -2419,7 +2734,18 @@
   document.addEventListener("click", event => {
     if (event.target.closest("button") && event.target !== dom.soundButton) playUiSound();
   });
-  window.addEventListener("resize", resizeCanvasToDisplaySize);
+  dom.canvas.addEventListener("pointerdown", handleCanvasPointerDown);
+  dom.canvas.addEventListener("pointermove", handleCanvasPointerMove);
+  dom.canvas.addEventListener("pointerup", handleCanvasPointerUp);
+  dom.canvas.addEventListener("pointercancel", handleCanvasPointerUp);
+  dom.canvas.addEventListener("wheel", handleCanvasWheel, { passive: false });
+  document.querySelectorAll(".collapse-button").forEach(button => {
+    button.addEventListener("click", () => togglePanel(button.closest(".collapsible-panel")));
+  });
+  window.addEventListener("resize", () => {
+    resizeCanvasToDisplaySize();
+    fitPanelsToViewport();
+  });
   window.addEventListener("beforeunload", safelyDestroyPeer);
 
   updateSettingOutputs();
