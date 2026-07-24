@@ -5,6 +5,8 @@
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
   const MIN_TERRAIN_SAMPLES = 560;
+  const NETWORK_CHUNK_SIZE = 4000;
+  const NETWORK_TRANSFER_TTL = 30000;
   const TEAM_NAMES = { blue: "Blue", red: "Red" };
   const OTHER_TEAM = { blue: "red", red: "blue" };
   const WIND_LABELS = ["None", "Low", "Medium", "High", "Wild"];
@@ -125,6 +127,9 @@
   let guestReadyTimer = null;
   let initialGameToken = null;
   let receivedInitialGameToken = null;
+  let lastInitialGameSendAt = 0;
+  let outboundTransferCounter = 0;
+  const incomingTransfers = new Map();
   let isResetting = false;
   let gameState = null;
   let animation = null;
@@ -167,6 +172,99 @@
 
   function deepClone(value) {
     return JSON.parse(JSON.stringify(value));
+  }
+
+  function sendNetwork(payload, targetConnection = connection) {
+    if (!targetConnection || !targetConnection.open) return false;
+
+    let encoded;
+    try {
+      encoded = JSON.stringify(payload);
+    } catch (error) {
+      console.error("Unable to encode network message", error);
+      return false;
+    }
+
+    if (encoded.length <= NETWORK_CHUNK_SIZE) {
+      try {
+        targetConnection.send(payload);
+        return true;
+      } catch (error) {
+        console.error("Unable to send network message", error);
+        return false;
+      }
+    }
+
+    const transferId = `${Date.now().toString(36)}-${(++outboundTransferCounter).toString(36)}-${makeCode(3)}`;
+    const total = Math.ceil(encoded.length / NETWORK_CHUNK_SIZE);
+
+    try {
+      for (let index = 0; index < total; index += 1) {
+        const start = index * NETWORK_CHUNK_SIZE;
+        targetConnection.send({
+          type: "network-chunk",
+          transferId,
+          index,
+          total,
+          payloadType: payload.type || "message",
+          chunk: encoded.slice(start, start + NETWORK_CHUNK_SIZE)
+        });
+      }
+      return true;
+    } catch (error) {
+      console.error("Unable to send blocked network message", error);
+      return false;
+    }
+  }
+
+  function receiveNetworkChunk(packet) {
+    if (typeof packet.transferId !== "string" || !Number.isInteger(packet.index) || !Number.isInteger(packet.total)) return;
+    if (packet.total < 1 || packet.total > 2000 || packet.index < 0 || packet.index >= packet.total || typeof packet.chunk !== "string") return;
+
+    const now = Date.now();
+    for (const [transferId, transfer] of incomingTransfers) {
+      if (now - transfer.startedAt > NETWORK_TRANSFER_TTL) incomingTransfers.delete(transferId);
+    }
+
+    let transfer = incomingTransfers.get(packet.transferId);
+    if (!transfer) {
+      transfer = {
+        chunks: new Array(packet.total),
+        received: 0,
+        total: packet.total,
+        payloadType: packet.payloadType || "message",
+        startedAt: now
+      };
+      incomingTransfers.set(packet.transferId, transfer);
+    }
+
+    if (transfer.total !== packet.total) {
+      incomingTransfers.delete(packet.transferId);
+      return;
+    }
+
+    if (transfer.chunks[packet.index] === undefined) {
+      transfer.chunks[packet.index] = packet.chunk;
+      transfer.received += 1;
+    }
+
+    if (role === "guest" && currentScreen === "lobby" && transfer.payloadType === "game-init") {
+      const percent = Math.round((transfer.received / transfer.total) * 100);
+      dom.lobbyMessage.textContent = `Receiving battlefield… ${percent}%`;
+    }
+
+    if (transfer.received !== transfer.total) return;
+    incomingTransfers.delete(packet.transferId);
+
+    try {
+      const restored = JSON.parse(transfer.chunks.join(""));
+      handleNetworkData(restored);
+    } catch (error) {
+      console.error("Unable to rebuild network message", error);
+      const message = "Battlefield transfer was incomplete. Retrying…";
+      if (currentScreen === "lobby") addLobbyLog(message);
+      else addEvent(message, "error");
+    }
   }
 
   function makeCode(length = 6) {
@@ -484,7 +582,7 @@
       const outgoing = peer.connect(PREFIX + code, {
         reliable: true,
         serialization: "json",
-        metadata: { application: "red-blue-tanks", version: 6, request: "join" }
+        metadata: { application: "red-blue-tanks", version: 7, request: "join" }
       });
       connection = outgoing;
       wireConnection(outgoing);
@@ -540,6 +638,10 @@
 
   function handleNetworkData(data) {
     if (!data || typeof data !== "object") return;
+    if (data.type === "network-chunk") {
+      receiveNetworkChunk(data);
+      return;
+    }
 
     switch (data.type) {
       case "accepted":
@@ -574,19 +676,20 @@
         if (initialGameToken && data.token && data.token !== initialGameToken) return;
         clearGuestReadyHandshake();
         if (receivedInitialGameToken && receivedInitialGameToken === data.token) {
-          connection?.send({ type: "game-init-ack", token: data.token });
+          sendNetwork({ type: "game-init-ack", token: data.token });
           return;
         }
         receivedInitialGameToken = data.token || "legacy";
         accepted = true;
         enterGame(data.state);
-        connection?.send({ type: "game-init-ack", token: data.token || null });
+        sendNetwork({ type: "game-init-ack", token: data.token || null });
         addEvent("Battlefield received from host.");
         break;
 
       case "game-init-ack":
         if (role !== "host") return;
         if (data.token && initialGameToken && data.token !== initialGameToken) return;
+        lastInitialGameSendAt = 0;
         addEvent("Guest battlefield confirmed.");
         break;
 
@@ -663,7 +766,7 @@
     const settings = readSettings();
     const state = createGameState(settings);
     enterGame(state);
-    connection.send({ type: "accepted", settings, token: initialGameToken });
+    sendNetwork({ type: "accepted", settings, token: initialGameToken });
     addEvent("Guest accepted. Waiting for battlefield confirmation…");
   }
 
@@ -676,12 +779,15 @@
 
   function sendInitialGameState() {
     if (role !== "host" || !connection?.open || !gameState) return;
-    connection.send({
+    const now = Date.now();
+    if (now - lastInitialGameSendAt < 1800) return;
+    lastInitialGameSendAt = now;
+    const sent = sendNetwork({
       type: "game-init",
       token: initialGameToken,
       state: compactInitialGameState(gameState)
     });
-    addEvent("Sending battlefield to guest…");
+    if (sent) addEvent("Sending battlefield to guest in safe data blocks…");
   }
 
   function beginGuestReadyHandshake() {
@@ -691,7 +797,7 @@
         clearGuestReadyHandshake();
         return;
       }
-      connection.send({ type: "guest-ready", token: initialGameToken });
+      sendNetwork({ type: "guest-ready", token: initialGameToken });
     };
     announceReady();
     guestReadyTimer = setInterval(announceReady, 2500);
@@ -707,7 +813,7 @@
     acceptRequested = false;
     dom.acceptButton.disabled = false;
     dom.acceptButton.textContent = "Accept";
-    if (pendingConnection.open) pendingConnection.send({ type: "declined" });
+    if (pendingConnection.open) sendNetwork({ type: "declined" }, pendingConnection);
     setTimeout(() => pendingConnection && pendingConnection.close(), 80);
     pendingConnection = null;
     dom.incomingRequest.classList.add("hidden");
@@ -740,7 +846,7 @@
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
     const state = {
-      version: 6,
+      version: 7,
       seed,
       settings,
       terrain: terrain.map(value => round(value, 3)),
@@ -1037,7 +1143,7 @@
     for (const team of ["blue", "red"]) {
       state.tanks[team].angle = elevationFromWorldAngle(team, state.tanks[team].angle);
     }
-    state.version = 6;
+    state.version = 7;
     return state;
   }
 
@@ -1151,7 +1257,7 @@
     const team = localTeam();
     if (role === "guest") {
       localInputPending = true;
-      connection.send({ type: "input", action: "move", direction });
+      sendNetwork({ type: "input", action: "move", direction });
       updateGameControls();
     } else {
       authoritativeMove(team, direction);
@@ -1189,7 +1295,7 @@
 
   function rejectGuestInput(message) {
     if (role === "host" && connection && connection.open) {
-      connection.send({ type: "state", state: gameState, message });
+      sendNetwork({ type: "state", state: gameState, message });
     }
     addEvent(message);
   }
@@ -1205,7 +1311,7 @@
 
     if (role === "guest") {
       localInputPending = true;
-      connection.send({ type: "input", action: "fire", angle, power, doubleStrike });
+      sendNetwork({ type: "input", action: "fire", angle, power, doubleStrike });
       updateGameControls();
     } else {
       authoritativeFire(team, angle, power, doubleStrike);
@@ -1281,7 +1387,7 @@
       resultingState
     };
 
-    if (role === "host" && connection && connection.open) connection.send({ type: "shot", packet });
+    if (role === "host" && connection && connection.open) sendNetwork({ type: "shot", packet });
     beginShotAnimation(packet);
   }
 
@@ -1537,7 +1643,7 @@
 
   function broadcastState(message = "", movement = null) {
     if (role === "host" && connection && connection.open) {
-      connection.send({ type: "state", state: gameState, message, movement });
+      sendNetwork({ type: "state", state: gameState, message, movement });
     }
   }
 
@@ -1653,7 +1759,7 @@
         playIncomingChatSound();
       }, 650);
     } else if (connection && connection.open && accepted) {
-      connection.send({ type: "chat", sender: team, text });
+      sendNetwork({ type: "chat", sender: team, text });
     }
     playOutgoingChatSound();
   }
@@ -1705,7 +1811,7 @@
 
     if (!connection || !connection.open || !accepted) return;
     localActionRequest = { action, payload };
-    connection.send({ type: "action-request", action, payload, sender: localTeam() });
+    sendNetwork({ type: "action-request", action, payload, sender: localTeam() });
     showCanvasMessage(
       `${action === "replay" ? "REPLAY" : "BATTLEFIELD"} REQUESTED`,
       `Waiting for ${TEAM_NAMES[OTHER_TEAM[localTeam()]]} to accept.`,
@@ -1725,7 +1831,7 @@
   function receiveActionRequest(data) {
     if (!gameState || !accepted || !["restart", "regenerate", "replay", "change-world"].includes(data.action)) return;
     if (pendingActionRequest || localActionRequest) {
-      connection?.send({ type: "action-response", action: data.action, accepted: false, reason: "busy" });
+      sendNetwork({ type: "action-response", action: data.action, accepted: false, reason: "busy" });
       return;
     }
     pendingActionRequest = { action: data.action, payload: data.payload || {}, sender: data.sender };
@@ -1744,7 +1850,7 @@
     if (!pendingActionRequest) return;
     const { action, payload } = pendingActionRequest;
     pendingActionRequest = null;
-    connection?.send({ type: "action-response", action, accepted: true });
+    sendNetwork({ type: "action-response", action, accepted: true });
 
     if (role === "host") {
       executeRoundAction(action, payload);
@@ -1757,7 +1863,7 @@
     if (!pendingActionRequest) return;
     const { action } = pendingActionRequest;
     pendingActionRequest = null;
-    connection?.send({ type: "action-response", action, accepted: false });
+    sendNetwork({ type: "action-response", action, accepted: false });
     addEvent("Replay or battlefield request declined.");
     dom.gameLocationSelect.value = gameState.settings.location;
     if (gameState?.winner) updateGameUI(false);
@@ -1812,7 +1918,7 @@
     pendingActionRequest = null;
     localActionRequest = null;
     if (role === "host" && connection && connection.open) {
-      connection.send({ type: "round-start", state, message });
+      sendNetwork({ type: "round-start", state, message });
     }
     enterGame(state, true);
     playRoundSound();
@@ -1849,6 +1955,8 @@
     localActionRequest = null;
     acceptRequested = false;
     clearGuestReadyHandshake();
+    incomingTransfers.clear();
+    lastInitialGameSendAt = 0;
     initialGameToken = null;
     receivedInitialGameToken = null;
     winnerModalDismissed = false;
@@ -1863,6 +1971,8 @@
   }
 
   function safelyDestroyPeer() {
+    incomingTransfers.clear();
+    lastInitialGameSendAt = 0;
     try { if (connection) connection.close(); } catch {}
     try { if (pendingConnection) pendingConnection.close(); } catch {}
     try { if (peer && !peer.destroyed) peer.destroy(); } catch {}
@@ -1880,6 +1990,8 @@
     accepted = false;
     acceptRequested = false;
     clearGuestReadyHandshake();
+    incomingTransfers.clear();
+    lastInitialGameSendAt = 0;
     initialGameToken = null;
     receivedInitialGameToken = null;
     gameState = null;
