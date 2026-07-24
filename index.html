@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#182033">
+  <title>Tanks P2P Connection Test</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">BROWSER-TO-BROWSER TEST</div>
+      <h1>Tanks P2P</h1>
+      <p class="lede">Host a room, share the six-character code, and send tiny shot messages directly between two browsers.</p>
+    </header>
+
+    <section id="startPanel" class="panel start-panel">
+      <button id="hostButton" class="primary large">Host a game</button>
+      <div class="divider"><span>or</span></div>
+      <label for="joinCode">Enter the host's code</label>
+      <div class="join-row">
+        <input id="joinCode" type="text" inputmode="text" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" aria-label="Host code">
+        <button id="joinButton" class="secondary">Join</button>
+      </div>
+    </section>
+
+    <section id="roomPanel" class="panel hidden" aria-live="polite">
+      <div class="status-row">
+        <span id="statusDot" class="status-dot"></span>
+        <strong id="statusText">Starting…</strong>
+      </div>
+
+      <div id="hostCodeArea" class="code-area hidden">
+        <span>Your host code</span>
+        <div class="code-row">
+          <strong id="hostCode">------</strong>
+          <button id="copyCodeButton" class="small">Copy</button>
+        </div>
+        <p>Send this code to the other player.</p>
+      </div>
+
+      <div id="incomingArea" class="incoming hidden">
+        <strong>A player wants to join.</strong>
+        <div class="incoming-actions">
+          <button id="acceptButton" class="primary">Accept</button>
+          <button id="declineButton" class="danger">Decline</button>
+        </div>
+      </div>
+
+      <div id="controlsArea" class="controls hidden">
+        <h2>Send a test shot</h2>
+        <div class="control-grid">
+          <label>
+            <span>Angle <output id="angleOutput">45°</output></span>
+            <input id="angle" type="range" min="0" max="90" value="45">
+          </label>
+          <label>
+            <span>Power <output id="powerOutput">60</output></span>
+            <input id="power" type="range" min="1" max="100" value="60">
+          </label>
+        </div>
+        <button id="fireButton" class="fire">FIRE TEST SHOT</button>
+      </div>
+
+      <div class="log-wrap">
+        <h2>Connection log</h2>
+        <div id="log" class="log" role="log" aria-live="polite"></div>
+      </div>
+
+      <button id="resetButton" class="text-button">Leave and start again</button>
+    </section>
+
+    <footer>
+      <p>The PeerJS cloud service introduces the browsers. Once connected, WebRTC sends the game messages peer-to-peer.</p>
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
