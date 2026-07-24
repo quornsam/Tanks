@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v2</title>
+  <title>Red vs Blue — P2P Tanks v3</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -26,7 +26,7 @@
         <div class="hero-card">
           <div class="hero-copy">
             <p class="eyebrow">TURN-BASED TANK DUEL</p>
-            <h2>Choose the world.<br>Set the physics.<br>Take the shot.</h2>
+            <h2>Choose the world. Set the physics. Take the shot.</h2>
             <p>Host a direct browser-to-browser game, join with a six-character code, or fight the computer locally.</p>
           </div>
           <div class="hero-art" aria-hidden="true">
@@ -90,6 +90,10 @@
                 <span>Direct hits to destroy <output id="hitsOutput">3</output></span>
                 <input id="hitsInput" type="range" min="1" max="8" step="1" value="3">
               </label>
+            </div>
+            <div id="visibilityWarning" class="visibility-warning hidden" role="alert" aria-live="polite">
+              <span class="warning-icon">⚠</span>
+              <div><strong>Tanks may be difficult to see</strong><small id="visibilityWarningText">Use the magnifying-glass locator during play.</small></div>
             </div>
           </section>
 
@@ -191,6 +195,9 @@
                   </div>
                 </div>
               </div>
+              <div id="canvasViewLabel" class="canvas-view-label">WHOLE BATTLEFIELD</div>
+              <button id="soundButton" class="canvas-tool sound-tool active" title="Toggle sound" aria-label="Toggle sound">♪</button>
+              <button id="locatorButton" class="canvas-tool locator-tool" title="Find tanks" aria-label="Find tanks">⌕</button>
               <button id="fullscreenButton" class="canvas-tool" title="Full screen" aria-label="Full screen">⛶</button>
             </div>
 
@@ -244,7 +251,6 @@
                   <p class="eyebrow">COMMS</p>
                   <h3>Battle chat</h3>
                 </div>
-                <button id="soundButton" class="icon-button active" title="Toggle sound" aria-label="Toggle sound">♪</button>
               </div>
               <div id="chatLog" class="chat-log" role="log" aria-live="polite"></div>
               <form id="chatForm" class="chat-form">

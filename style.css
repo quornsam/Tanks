@@ -316,3 +316,181 @@ input[type="range"] { width: 100%; accent-color: var(--blue); }
   .canvas-dialog { padding: 20px 15px; }
   .round-action-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* v3: compact title, visibility warning, locator and full-screen battlefield */
+.topbar { min-height: 54px; }
+.hero-card {
+  min-height: 106px;
+  grid-template-columns: 1.35fr .65fr;
+  border-radius: 18px;
+}
+.hero-copy { padding: 15px 24px; }
+.hero-copy h2 {
+  margin: 5px 0 7px;
+  font-size: clamp(1.25rem, 2.7vw, 2.05rem);
+  line-height: 1;
+  letter-spacing: -.035em;
+}
+.hero-copy > p:last-child {
+  max-width: 760px;
+  font-size: .78rem;
+  line-height: 1.35;
+}
+.hero-art { min-height: 106px; }
+.hero-art .sun { width: 50px; height: 50px; right: 18%; top: 12%; box-shadow: 0 0 25px rgba(251, 209, 125, .26); }
+.hero-art .hill { bottom: -42%; height: 88%; }
+.hero-art .hill-back { bottom: -21%; }
+.hero-art .mini-tank { width: 40px; height: 17px; bottom: 22%; border-radius: 6px; }
+.hero-art .mini-tank::before { left: 10px; top: -8px; width: 20px; height: 12px; }
+.hero-art .mini-tank::after { left: 20px; top: -5px; width: 25px; height: 3px; }
+.hero-art .mini-tank i { left: 3px; right: 3px; bottom: -4px; height: 6px; border-width: 1px; }
+.hero-art .red-mini::after { left: -7px; }
+.hero-art .arc { top: 13%; height: 55%; }
+.home-grid { margin-top: 12px; }
+
+.visibility-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 20px;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 211, 101, .48);
+  border-radius: 12px;
+  color: #fff1bd;
+  background: rgba(255, 211, 101, .09);
+  animation: warning-in .2s ease both;
+}
+.visibility-warning .warning-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: #322500;
+  background: var(--yellow);
+  font-weight: 950;
+}
+.visibility-warning strong,
+.visibility-warning small { display: block; }
+.visibility-warning strong { font-size: .78rem; }
+.visibility-warning small { margin-top: 3px; color: #d8cda8; font-size: .68rem; line-height: 1.4; }
+@keyframes warning-in { from { opacity: 0; transform: translateY(-4px); } }
+
+.locator-tool { right: 54px; font-size: 1.2rem; }
+.canvas-tool.active {
+  color: #08233d;
+  border-color: rgba(143, 199, 255, .9);
+  background: #8fc7ff;
+  box-shadow: 0 0 0 3px rgba(79, 164, 255, .18);
+}
+.canvas-view-label {
+  position: absolute;
+  z-index: 5;
+  top: 11px;
+  left: 12px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 8px;
+  color: rgba(255,255,255,.82);
+  background: rgba(5, 10, 18, .48);
+  backdrop-filter: blur(6px);
+  font-size: .56rem;
+  font-weight: 900;
+  letter-spacing: .11em;
+  pointer-events: none;
+}
+
+#gameScreen:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  margin: 0;
+  padding: 8px;
+  overflow: hidden;
+  background: #080d16;
+}
+#gameScreen:fullscreen .game-layout {
+  display: block;
+  height: 100%;
+}
+#gameScreen:fullscreen .battle-column {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+}
+#gameScreen:fullscreen .battle-hud {
+  z-index: 10;
+  margin: 0;
+  gap: 8px;
+}
+#gameScreen:fullscreen .tank-card,
+#gameScreen:fullscreen .turn-card {
+  min-height: 56px;
+  padding: 7px 12px;
+  border-radius: 11px;
+  background: rgba(13, 21, 35, .96);
+}
+#gameScreen:fullscreen .hit-pips { margin-top: 7px; }
+#gameScreen:fullscreen .turn-card strong,
+#gameScreen:fullscreen .turn-card small { margin-top: 1px; }
+#gameScreen:fullscreen .scoreboard-strip { margin-top: 4px; padding-top: 4px; }
+#gameScreen:fullscreen .canvas-frame {
+  min-height: 0;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 12px;
+  box-shadow: none;
+}
+#gameScreen:fullscreen .controls-panel {
+  z-index: 10;
+  grid-template-columns: 125px minmax(130px, 1fr) minmax(130px, 1fr) 125px;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: 11px;
+  background: rgba(13, 21, 35, .97);
+}
+#gameScreen:fullscreen .fire-button { min-height: 49px; }
+#gameScreen:fullscreen .side-column { display: none; }
+
+@media (max-width: 800px) {
+  .hero-card { grid-template-columns: 1fr .55fr; }
+  .hero-art { display: block; min-height: 106px; }
+  #gameScreen:fullscreen .controls-panel {
+    grid-template-columns: 105px 1fr 1fr 105px;
+  }
+}
+
+@media (max-width: 600px) {
+  .hero-card { grid-template-columns: 1fr; }
+  .hero-art { display: none; }
+  .hero-copy { padding: 14px 18px; }
+  .hero-copy > p:last-child { display: none; }
+  #gameScreen:fullscreen { padding: 4px; }
+  #gameScreen:fullscreen .battle-hud { grid-template-columns: 1fr 1.25fr 1fr; gap: 4px; }
+  #gameScreen:fullscreen .tank-card,
+  #gameScreen:fullscreen .turn-card { padding: 5px 6px; }
+  #gameScreen:fullscreen .controls-panel {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 6px;
+  }
+  #gameScreen:fullscreen .move-controls,
+  #gameScreen:fullscreen .fire-button { min-height: 44px; }
+}
+.visibility-warning {
+  border-color: rgba(255, 211, 101, .72);
+  background: rgba(255, 211, 101, .15);
+}
+.visibility-warning strong { color: #fff4c9; }
+.visibility-warning small { color: #eadfb8; }
+.sound-tool { right: 98px; }
+.sound-tool.active {
+  color: var(--green);
+  border-color: rgba(105,226,155,.45);
+  background: rgba(5, 10, 18, .62);
+  box-shadow: none;
+}

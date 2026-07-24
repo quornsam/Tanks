@@ -34,6 +34,8 @@
     windOutput: $("windOutput"),
     hitsInput: $("hitsInput"),
     hitsOutput: $("hitsOutput"),
+    visibilityWarning: $("visibilityWarning"),
+    visibilityWarningText: $("visibilityWarningText"),
     presetButton: $("presetButton"),
     hostButton: $("hostButton"),
     botButton: $("botButton"),
@@ -70,6 +72,8 @@
     replayRequestButton: $("replayRequestButton"),
     replayAcceptButton: $("replayAcceptButton"),
     replayDeclineButton: $("replayDeclineButton"),
+    canvasViewLabel: $("canvasViewLabel"),
+    locatorButton: $("locatorButton"),
     fullscreenButton: $("fullscreenButton"),
     moveLeftButton: $("moveLeftButton"),
     moveRightButton: $("moveRightButton"),
@@ -114,6 +118,8 @@
   let soundEnabled = true;
   let audioContext = null;
   let lastFrameTime = performance.now();
+  let viewMode = "world";
+  let visibilityWarningActive = false;
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -225,6 +231,21 @@
     dom.tankSizeOutput.textContent = `${dom.tankSizeInput.value}%`;
     dom.windOutput.textContent = WIND_LABELS[Number(dom.windInput.value)];
     dom.hitsOutput.textContent = dom.hitsInput.value;
+    updateVisibilityWarning();
+  }
+
+  function updateVisibilityWarning() {
+    const tankSize = Number(dom.tankSizeInput.value);
+    const worldSize = dom.worldSizeSelect.value;
+    const difficult = (worldSize === "epic" && tankSize <= 20) || (worldSize === "massive" && tankSize <= 10);
+    dom.visibilityWarning.classList.toggle("hidden", !difficult);
+    if (difficult) {
+      const worldLabel = capitalize(worldSize);
+      const article = worldLabel === "Epic" ? "an" : "a";
+      dom.visibilityWarningText.textContent = `${tankSize}% tanks on ${article} ${worldLabel} map will be tiny in the whole-map view. Use the magnifying-glass locator during play.`;
+      if (!visibilityWarningActive) playWarningSound();
+    }
+    visibilityWarningActive = difficult;
   }
 
   function renderRulesSummary(settings) {
@@ -357,7 +378,7 @@
       const outgoing = peer.connect(PREFIX + code, {
         reliable: true,
         serialization: "json",
-        metadata: { application: "red-blue-tanks", version: 2, request: "join" }
+        metadata: { application: "red-blue-tanks", version: 3, request: "join" }
       });
       connection = outgoing;
       wireConnection(outgoing);
@@ -446,7 +467,10 @@
         localInputPending = false;
         animation = null;
         updateGameUI(true);
-        if (data.message) addEvent(data.message);
+        if (data.message) {
+          addEvent(data.message);
+          if (/ moved /.test(` ${data.message} `)) playMoveSound();
+        }
         break;
 
       case "shot":
@@ -543,7 +567,7 @@
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
     const state = {
-      version: 2,
+      version: 3,
       seed,
       settings,
       terrain: terrain.map(value => round(value, 3)),
@@ -751,6 +775,7 @@
   function enterGame(state, preserveLogs = false) {
     gameState = normalizeGameState(state);
     animation = null;
+    setViewMode("world", false);
     localInputPending = false;
     pendingActionRequest = null;
     localActionRequest = null;
@@ -866,6 +891,7 @@
     dom.angleInput.disabled = !enabled;
     dom.powerInput.disabled = !enabled;
     dom.fireButton.disabled = !enabled;
+    dom.locatorButton.disabled = Boolean(animation);
     const roundControlBusy = Boolean(animation || pendingActionRequest || localActionRequest);
     dom.restartRoundButton.disabled = roundControlBusy;
     dom.regenerateMapButton.disabled = roundControlBusy;
@@ -917,6 +943,7 @@
     gameState.movedThisTurn = true;
     localInputPending = false;
     const message = `${TEAM_NAMES[team]} moved ${direction < 0 ? "left" : "right"}.`;
+    playMoveSound();
     addEvent(message);
     broadcastState(message);
     updateGameUI(true);
@@ -1136,6 +1163,7 @@
 
   function beginShotAnimation(packet) {
     if (!packet || !Array.isArray(packet.trajectory) || packet.trajectory.length < 2) return;
+    setViewMode("world", false);
     localInputPending = false;
     animation = {
       packet,
@@ -1162,11 +1190,14 @@
       addEvent("Terrain impact.");
     } else {
       addEvent("Shot left the battlefield.");
+      playMissSound();
     }
 
     if (gameState.winner) {
       addEvent(`${TEAM_NAMES[gameState.winner]} wins the battle.`, "hit");
       playVictorySound();
+    } else {
+      playTurnSound(gameState.turn);
     }
 
     updateGameUI(true);
@@ -1406,6 +1437,7 @@
       connection.send({ type: "round-start", state, message });
     }
     enterGame(state, true);
+    playRoundSound();
     addEvent(message);
   }
 
@@ -1434,6 +1466,7 @@
     pendingActionRequest = null;
     localActionRequest = null;
     acceptRequested = false;
+    setViewMode("world", false);
     dom.homeNotice.textContent = "";
     dom.chatLog.replaceChildren();
     dom.eventLog.replaceChildren();
@@ -1463,6 +1496,7 @@
     localInputPending = false;
     pendingActionRequest = null;
     localActionRequest = null;
+    setViewMode("world", false);
     dom.lobbyLog.replaceChildren();
     dom.chatLog.replaceChildren();
     dom.eventLog.replaceChildren();
@@ -1487,9 +1521,66 @@
 
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
-      dom.canvasFrame.requestFullscreen?.();
+      dom.gameScreen.requestFullscreen?.();
     } else {
       document.exitFullscreen?.();
+    }
+  }
+
+  function updateFullscreenButton() {
+    const active = document.fullscreenElement === dom.gameScreen;
+    dom.fullscreenButton.textContent = active ? "×" : "⛶";
+    dom.fullscreenButton.title = active ? "Exit full screen" : "Full screen";
+    dom.fullscreenButton.setAttribute("aria-label", active ? "Exit full screen" : "Full screen");
+    requestAnimationFrame(resizeCanvasToDisplaySize);
+  }
+
+  function setViewMode(mode, announce = true) {
+    viewMode = ["world", "blue", "red"].includes(mode) ? mode : "world";
+    if (!dom.canvasViewLabel || !dom.locatorButton) return;
+    const labels = {
+      world: "WHOLE BATTLEFIELD",
+      blue: "LOCATING BLUE TANK",
+      red: "LOCATING RED TANK"
+    };
+    dom.canvasViewLabel.textContent = labels[viewMode];
+    dom.locatorButton.classList.toggle("active", viewMode !== "world");
+    dom.locatorButton.title = viewMode === "world" ? "Find blue tank" : viewMode === "blue" ? "Find red tank" : "Return to whole battlefield";
+    dom.locatorButton.setAttribute("aria-label", dom.locatorButton.title);
+    if (announce && gameState) {
+      playLocatorSound();
+      addEvent(viewMode === "world" ? "Whole battlefield view restored." : `${TEAM_NAMES[viewMode]} tank located.`);
+    }
+  }
+
+  function cycleTankView() {
+    if (!gameState) return;
+    setViewMode(viewMode === "world" ? "blue" : viewMode === "blue" ? "red" : "world");
+  }
+
+  function currentViewBounds() {
+    if (!gameState || viewMode === "world") {
+      return { minX: 0, maxX: gameState ? gameState.settings.worldWidth : 1, minY: 0, maxY: WORLD_HEIGHT };
+    }
+    const tank = gameState.tanks[viewMode];
+    const worldWidth = gameState.settings.worldWidth;
+    const canvasWidth = Math.max(640, dom.canvas.width || 1280);
+    const canvasHeight = Math.max(360, dom.canvas.height || 720);
+    const xSpan = clamp(tankWorldWidth() * canvasWidth / 70, 12, Math.min(90, worldWidth));
+    const ySpan = clamp(tankWorldHeight() * canvasHeight / 28, 14, 60);
+    const ground = terrainAt(tank.x);
+    const minX = clamp(tank.x - xSpan / 2, 0, Math.max(0, worldWidth - xSpan));
+    const minY = clamp(ground - ySpan * .32, 0, WORLD_HEIGHT - ySpan);
+    return { minX, maxX: minX + Math.min(xSpan, worldWidth), minY, maxY: minY + ySpan };
+  }
+
+  function resizeCanvasToDisplaySize() {
+    const rect = dom.canvas.getBoundingClientRect();
+    const width = Math.max(320, Math.round(rect.width));
+    const height = Math.max(180, Math.round(rect.height));
+    if (dom.canvas.width !== width || dom.canvas.height !== height) {
+      dom.canvas.width = width;
+      dom.canvas.height = height;
     }
   }
 
@@ -1538,19 +1629,68 @@
   }
 
   function playFireSound() {
-    tone(160, .16, "sawtooth", .045);
-    tone(75, .22, "square", .035, .04);
+    noiseBurst(.12, .035);
+    tone(145, .13, "sawtooth", .055);
+    tone(72, .26, "square", .04, .035);
+    tone(410, .09, "triangle", .025, .02);
+  }
+
+  function playExplosionSound(directHit = false) {
+    noiseBurst(directHit ? .48 : .38, directHit ? .15 : .11);
+    tone(directHit ? 48 : 58, directHit ? .58 : .43, "sine", directHit ? .11 : .075);
+    tone(115, .18, "sawtooth", .028, .025);
   }
 
   function playHitSound() {
-    noiseBurst(.36, .12);
-    tone(62, .45, "sine", .09);
+    tone(880, .06, "square", .045);
+    tone(510, .14, "square", .04, .055);
+    tone(96, .32, "triangle", .055, .08);
+  }
+
+  function playMoveSound() {
+    noiseBurst(.16, .025);
+    tone(92, .08, "square", .025);
+    tone(78, .08, "square", .022, .07);
+    tone(102, .07, "square", .02, .135);
+  }
+
+  function playMissSound() {
+    tone(260, .16, "sine", .024);
+    tone(190, .22, "sine", .018, .12);
+  }
+
+  function playTurnSound(team) {
+    const base = team === "blue" ? 520 : 390;
+    tone(base, .08, "triangle", .025);
+    tone(base * 1.25, .11, "triangle", .022, .075);
+  }
+
+  function playRoundSound() {
+    tone(220, .1, "triangle", .035);
+    tone(330, .12, "triangle", .035, .09);
+    tone(440, .16, "triangle", .04, .18);
+  }
+
+  function playLocatorSound() {
+    tone(720, .055, "sine", .022);
+    tone(930, .075, "sine", .018, .06);
+  }
+
+  function playWarningSound() {
+    tone(250, .09, "square", .022);
+    tone(210, .12, "square", .018, .1);
+  }
+
+  function playUiSound() {
+    tone(460, .045, "triangle", .012);
   }
 
   function playVictorySound() {
+    noiseBurst(.18, .035);
     tone(330, .18, "triangle", .05);
     tone(440, .18, "triangle", .05, .16);
     tone(660, .35, "triangle", .06, .32);
+    tone(880, .28, "triangle", .04, .47);
   }
 
   function playChatSound() {
@@ -1559,20 +1699,29 @@
   }
 
   function canvasMetrics() {
+    const bounds = currentViewBounds();
     return {
       width: dom.canvas.width,
       height: dom.canvas.height,
-      sx: dom.canvas.width / gameState.settings.worldWidth,
-      sy: dom.canvas.height / WORLD_HEIGHT
+      minX: bounds.minX,
+      maxX: bounds.maxX,
+      minY: bounds.minY,
+      maxY: bounds.maxY,
+      sx: dom.canvas.width / Math.max(.001, bounds.maxX - bounds.minX),
+      sy: dom.canvas.height / Math.max(.001, bounds.maxY - bounds.minY)
     };
   }
 
   function worldToCanvas(x, y) {
     const metrics = canvasMetrics();
-    return { x: x * metrics.sx, y: metrics.height - y * metrics.sy };
+    return {
+      x: (x - metrics.minX) * metrics.sx,
+      y: (metrics.maxY - y) * metrics.sy
+    };
   }
 
   function renderFrame(now) {
+    resizeCanvasToDisplaySize();
     const elapsed = Math.min(100, now - lastFrameTime);
     lastFrameTime = now;
     if (gameState) drawGame(now, elapsed);
@@ -1592,6 +1741,7 @@
     drawAimGuide();
     drawTank("blue", now);
     drawTank("red", now);
+    drawLocatorReticle(now);
     drawProjectileAnimation(now);
     drawVignette();
   }
@@ -1777,9 +1927,9 @@
     ctx.beginPath();
     ctx.moveTo(0, metrics.height);
     gameState.terrain.forEach((heightValue, index) => {
-      const x = index / (gameState.terrain.length - 1) * metrics.width;
-      const y = metrics.height - heightValue * metrics.sy;
-      ctx.lineTo(x, y);
+      const worldX = index / (gameState.terrain.length - 1) * gameState.settings.worldWidth;
+      const point = worldToCanvas(worldX, heightValue);
+      ctx.lineTo(point.x, point.y);
     });
     ctx.lineTo(metrics.width, metrics.height);
     ctx.closePath();
@@ -1788,10 +1938,10 @@
 
     ctx.beginPath();
     gameState.terrain.forEach((heightValue, index) => {
-      const x = index / (gameState.terrain.length - 1) * metrics.width;
-      const y = metrics.height - heightValue * metrics.sy;
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      const worldX = index / (gameState.terrain.length - 1) * gameState.settings.worldWidth;
+      const point = worldToCanvas(worldX, heightValue);
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
     });
     ctx.lineWidth = 4;
     ctx.strokeStyle = location === "earth" ? "#8faf6e" : location === "mars" ? "#d27a53" : "#b0b4ba";
@@ -2044,6 +2194,30 @@
     ctx.restore();
   }
 
+  function drawLocatorReticle(now) {
+    if (viewMode === "world" || !gameState) return;
+    const center = tankCenter(gameState, viewMode);
+    const point = worldToCanvas(center.x, center.y);
+    const pulse = 32 + Math.sin(now * .006) * 5;
+    ctx.save();
+    ctx.strokeStyle = viewMode === "blue" ? "rgba(143,199,255,.92)" : "rgba(255,157,162,.92)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(5,10,18,.7)";
+    roundedRect(ctx, point.x - 38, point.y - pulse - 28, 76, 20, 7);
+    ctx.fill();
+    ctx.fillStyle = "white";
+    ctx.font = "900 10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${TEAM_NAMES[viewMode].toUpperCase()} TANK`, point.x, point.y - pulse - 18);
+    ctx.restore();
+  }
+
   function drawAimGuide() {
     if (!canLocalAct()) return;
     const team = localTeam();
@@ -2097,7 +2271,7 @@
         animation.phase = "explosion";
         animation.explosionStart = now;
         if (packet.impact && packet.impact.type !== "out") {
-          noiseBurst(.3, .08);
+          playExplosionSound(Boolean(packet.hitTeam));
         }
       }
     } else {
@@ -2211,6 +2385,7 @@
   dom.locationSelect.addEventListener("change", applyLocationPreset);
   dom.gravityInput.addEventListener("input", updateSettingOutputs);
   dom.tankSizeInput.addEventListener("input", updateSettingOutputs);
+  dom.worldSizeSelect.addEventListener("change", updateSettingOutputs);
   dom.windInput.addEventListener("input", updateSettingOutputs);
   dom.hitsInput.addEventListener("input", updateSettingOutputs);
   dom.presetButton.addEventListener("click", applyLocationPreset);
@@ -2230,6 +2405,7 @@
   dom.fireButton.addEventListener("click", requestFire);
   dom.chatForm.addEventListener("submit", submitChat);
   dom.soundButton.addEventListener("click", toggleSound);
+  dom.locatorButton.addEventListener("click", cycleTankView);
   dom.fullscreenButton.addEventListener("click", toggleFullscreen);
   dom.restartRoundButton.addEventListener("click", () => requestRoundAction("restart"));
   dom.regenerateMapButton.addEventListener("click", () => requestRoundAction("regenerate"));
@@ -2238,7 +2414,12 @@
   dom.replayDeclineButton.addEventListener("click", declineActionRequest);
   dom.leaveGameButton.addEventListener("click", resetAll);
   document.addEventListener("keydown", keyboardControls);
+  document.addEventListener("fullscreenchange", updateFullscreenButton);
   document.addEventListener("pointerdown", ensureAudio, { once: true });
+  document.addEventListener("click", event => {
+    if (event.target.closest("button") && event.target !== dom.soundButton) playUiSound();
+  });
+  window.addEventListener("resize", resizeCanvasToDisplaySize);
   window.addEventListener("beforeunload", safelyDestroyPeer);
 
   updateSettingOutputs();
