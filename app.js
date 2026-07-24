@@ -174,6 +174,51 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  // Network messages never carry the large terrain arrays. Every fresh map is
+  // recreated deterministically from its seed and settings on both computers.
+  function compactStateMetadata(state) {
+    const packet = deepClone(state);
+    delete packet.terrain;
+    delete packet.baseTerrain;
+    delete packet.ceiling;
+    delete packet.baseCeiling;
+    return packet;
+  }
+
+  function inflateFreshState(metadata) {
+    if (!metadata || !metadata.settings || !Number.isFinite(metadata.seed)) return null;
+    const packet = deepClone(metadata);
+    const settings = packet.settings;
+    const terrain = generateTerrain(settings, packet.seed);
+    const spawnPositions = packet.spawnPositions
+      ? deepClone(packet.spawnPositions)
+      : chooseSpawnPositions(terrain, settings, packet.seed);
+    guaranteeSpawnHeightDifference(terrain, spawnPositions, settings);
+    const padRadius = Math.max(6.5, 9.2 * (settings.tankSize / 100));
+    flattenTerrain(terrain, spawnPositions.blue, settings.worldWidth, padRadius);
+    flattenTerrain(terrain, spawnPositions.red, settings.worldWidth, padRadius);
+    const ceiling = settings.location === "cave"
+      ? generateCaveCeiling(terrain, settings, packet.seed)
+      : null;
+
+    packet.spawnPositions = spawnPositions;
+    packet.terrain = terrain.map(value => round(value, 3));
+    packet.baseTerrain = packet.terrain.slice();
+    packet.ceiling = ceiling ? ceiling.map(value => round(value, 3)) : null;
+    packet.baseCeiling = packet.ceiling ? packet.ceiling.slice() : null;
+    return normalizeGameState(packet);
+  }
+
+  function mergeRuntimeMetadata(metadata, sourceState = gameState) {
+    if (!metadata || !sourceState) return null;
+    const packet = deepClone(metadata);
+    packet.terrain = sourceState.terrain.slice();
+    packet.baseTerrain = sourceState.baseTerrain.slice();
+    packet.ceiling = sourceState.ceiling ? sourceState.ceiling.slice() : null;
+    packet.baseCeiling = sourceState.baseCeiling ? sourceState.baseCeiling.slice() : null;
+    return normalizeGameState(packet);
+  }
+
   function sendNetwork(payload, targetConnection = connection) {
     if (!targetConnection || !targetConnection.open) return false;
 
@@ -190,7 +235,7 @@
         targetConnection.send(payload);
         return true;
       } catch (error) {
-        console.error("Unable to send network message", error);
+        console.error("Unable to send network message", { error, type: payload?.type, characters: encoded.length });
         return false;
       }
     }
@@ -581,8 +626,8 @@
     peer.on("open", () => {
       const outgoing = peer.connect(PREFIX + code, {
         reliable: true,
-        serialization: "json",
-        metadata: { application: "red-blue-tanks", version: 7, request: "join" }
+        serialization: "binary",
+        metadata: { application: "red-blue-tanks", version: 8, request: "join" }
       });
       connection = outgoing;
       wireConnection(outgoing);
@@ -681,7 +726,13 @@
         }
         receivedInitialGameToken = data.token || "legacy";
         accepted = true;
-        enterGame(data.state);
+        const initialState = inflateFreshState(data.state);
+        if (!initialState) {
+          addLobbyLog("The battlefield descriptor was invalid. Requesting it again…");
+          receivedInitialGameToken = null;
+          return;
+        }
+        enterGame(initialState);
         sendNetwork({ type: "game-init-ack", token: data.token || null });
         addEvent("Battlefield received from host.");
         break;
@@ -700,7 +751,8 @@
 
       case "state":
         if (role !== "guest") return;
-        gameState = normalizeGameState(data.state);
+        gameState = mergeRuntimeMetadata(data.state, gameState);
+        if (!gameState) return;
         localInputPending = false;
         animation = null;
         if (data.movement) startMovementAnimation(data.movement.team, data.movement.fromX, data.movement.toX, false);
@@ -719,7 +771,11 @@
 
       case "round-start":
         if (role !== "guest") return;
-        enterGame(data.state, true);
+        {
+          const freshState = inflateFreshState(data.state);
+          if (!freshState) return;
+          enterGame(freshState, true);
+        }
         addEvent(data.message || "A new round has started.");
         break;
 
@@ -771,10 +827,7 @@
   }
 
   function compactInitialGameState(state) {
-    const packet = deepClone(state);
-    delete packet.baseTerrain;
-    delete packet.baseCeiling;
-    return packet;
+    return compactStateMetadata(state);
   }
 
   function sendInitialGameState() {
@@ -782,12 +835,16 @@
     const now = Date.now();
     if (now - lastInitialGameSendAt < 1800) return;
     lastInitialGameSendAt = now;
-    const sent = sendNetwork({
+    const payload = {
       type: "game-init",
       token: initialGameToken,
       state: compactInitialGameState(gameState)
-    });
-    if (sent) addEvent("Sending battlefield to guest in safe data blocks…");
+    };
+    const sent = sendNetwork(payload);
+    if (sent) {
+      const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
+      addEvent(`Sending compact battlefield instructions (${bytes.toLocaleString()} bytes)…`);
+    }
   }
 
   function beginGuestReadyHandshake() {
@@ -846,7 +903,7 @@
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
     const state = {
-      version: 7,
+      version: 8,
       seed,
       settings,
       terrain: terrain.map(value => round(value, 3)),
@@ -1295,7 +1352,7 @@
 
   function rejectGuestInput(message) {
     if (role === "host" && connection && connection.open) {
-      sendNetwork({ type: "state", state: gameState, message });
+      sendNetwork({ type: "state", state: compactStateMetadata(gameState), message });
     }
     addEvent(message);
   }
@@ -1384,7 +1441,7 @@
       impact: result.impact,
       hitTeam: hitTeams[0] || null,
       hitTeams,
-      resultingState
+      resultingState: compactStateMetadata(resultingState)
     };
 
     if (role === "host" && connection && connection.open) sendNetwork({ type: "shot", packet });
@@ -1615,7 +1672,17 @@
   function finishShotAnimation() {
     if (!animation) return;
     const packet = animation.packet;
-    gameState = packet.resultingState;
+    const nextState = mergeRuntimeMetadata(packet.resultingState, gameState);
+    if (!nextState) {
+      animation = null;
+      addEvent("Unable to apply the remote shot state.", "error");
+      return;
+    }
+    if (packet.impact && packet.impact.type !== "out") {
+      if (packet.impact.type === "ceiling") applyCeilingCrater(nextState, packet.impact.x, packet.blastRadius);
+      else applyCrater(nextState, packet.impact.x, packet.impact.y, packet.blastRadius);
+    }
+    gameState = nextState;
     animation = null;
 
     const hitTeams = Array.isArray(packet.hitTeams) ? packet.hitTeams : (packet.hitTeam ? [packet.hitTeam] : []);
@@ -1643,7 +1710,7 @@
 
   function broadcastState(message = "", movement = null) {
     if (role === "host" && connection && connection.open) {
-      sendNetwork({ type: "state", state: gameState, message, movement });
+      sendNetwork({ type: "state", state: compactStateMetadata(gameState), message, movement });
     }
   }
 
@@ -1918,7 +1985,7 @@
     pendingActionRequest = null;
     localActionRequest = null;
     if (role === "host" && connection && connection.open) {
-      sendNetwork({ type: "round-start", state, message });
+      sendNetwork({ type: "round-start", state: compactStateMetadata(state), message });
     }
     enterGame(state, true);
     playRoundSound();
