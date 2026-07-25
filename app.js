@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 15;
+  const APP_VERSION = 16;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -14,8 +14,15 @@
   const OFFSCREEN_RETURN_SECONDS = 5;
   const WEAPON_COSTS = { parachute: 10, bigBertha: 10, teleport: 10, engine: 10, repair: 20 };
   const ACTIVE_FRAME_INTERVAL = 1000 / ACTIVE_RENDER_FPS;
-  const TEAM_NAMES = { blue: "Blue", red: "Red" };
-  const OTHER_TEAM = { blue: "red", red: "blue" };
+  const TEAM_ORDER = ["blue", "red", "green", "yellow"];
+  const GUEST_TEAMS = ["red", "green", "yellow"];
+  const TEAM_NAMES = { blue: "Blue", red: "Red", green: "Green", yellow: "Yellow" };
+  const TEAM_COLOURS = {
+    blue: { accent: "#176fa8", light: "#55a9d8", dark: "#123b55", muted: "#538aa7" },
+    red: { accent: "#a72d31", light: "#e05a5d", dark: "#561b1d", muted: "#a45d57" },
+    green: { accent: "#3d8b58", light: "#73c889", dark: "#204d30", muted: "#5f9770" },
+    yellow: { accent: "#c49a2f", light: "#f0cb62", dark: "#65501b", muted: "#b39a56" }
+  };
   const WIND_LABELS = ["None", "Low", "Medium", "High", "Wild"];
   const WIND_LIMITS = [0, 1.5, 3.25, 5.5, 8.5];
   const WORLD_WIDTHS = { compact: 130, standard: 180, wide: 270, massive: 430, epic: 680 };
@@ -47,6 +54,8 @@
     visibilityWarning: $("visibilityWarning"),
     visibilityWarningText: $("visibilityWarningText"),
     presetButton: $("presetButton"),
+    playerNameInput: $("playerNameInput"),
+    tankNameInput: $("tankNameInput"),
     hostButton: $("hostButton"),
     botButton: $("botButton"),
     joinCode: $("joinCode"),
@@ -65,6 +74,11 @@
     roomCode: $("roomCode"),
     copyCodeButton: $("copyCodeButton"),
     incomingRequest: $("incomingRequest"),
+    incomingRequestTitle: $("incomingRequestTitle"),
+    incomingRequestMeta: $("incomingRequestMeta"),
+    lobbyRoster: $("lobbyRoster"),
+    lobbyPlayerCount: $("lobbyPlayerCount"),
+    startBattleButton: $("startBattleButton"),
     declineButton: $("declineButton"),
     acceptButton: $("acceptButton"),
     rulesSummary: $("rulesSummary"),
@@ -72,26 +86,51 @@
     leaveLobbyButton: $("leaveLobbyButton"),
     blueTankCard: $("blueTankCard"),
     redTankCard: $("redTankCard"),
+    greenTankCard: $("greenTankCard"),
+    yellowTankCard: $("yellowTankCard"),
+    bluePlayerName: $("bluePlayerName"),
+    redPlayerName: $("redPlayerName"),
+    greenPlayerName: $("greenPlayerName"),
+    yellowPlayerName: $("yellowPlayerName"),
+    blueTankName: $("blueTankName"),
+    redTankName: $("redTankName"),
+    greenTankName: $("greenTankName"),
+    yellowTankName: $("yellowTankName"),
     blueRoleLabel: $("blueRoleLabel"),
     redRoleLabel: $("redRoleLabel"),
+    greenRoleLabel: $("greenRoleLabel"),
+    yellowRoleLabel: $("yellowRoleLabel"),
     blueLoadout: $("blueLoadout"),
     redLoadout: $("redLoadout"),
+    greenLoadout: $("greenLoadout"),
+    yellowLoadout: $("yellowLoadout"),
     blueRecentActions: $("blueRecentActions"),
     redRecentActions: $("redRecentActions"),
+    greenRecentActions: $("greenRecentActions"),
+    yellowRecentActions: $("yellowRecentActions"),
     blueHits: $("blueHits"),
     redHits: $("redHits"),
+    greenHits: $("greenHits"),
+    yellowHits: $("yellowHits"),
     blueCredits: $("blueCredits"),
     redCredits: $("redCredits"),
+    greenCredits: $("greenCredits"),
+    yellowCredits: $("yellowCredits"),
     blueStatusTankCanvas: $("blueStatusTankCanvas"),
     redStatusTankCanvas: $("redStatusTankCanvas"),
+    greenStatusTankCanvas: $("greenStatusTankCanvas"),
+    yellowStatusTankCanvas: $("yellowStatusTankCanvas"),
     blueIntegrityLabel: $("blueIntegrityLabel"),
     redIntegrityLabel: $("redIntegrityLabel"),
+    greenIntegrityLabel: $("greenIntegrityLabel"),
+    yellowIntegrityLabel: $("yellowIntegrityLabel"),
     blueIntegrityFill: $("blueIntegrityFill"),
     redIntegrityFill: $("redIntegrityFill"),
+    greenIntegrityFill: $("greenIntegrityFill"),
+    yellowIntegrityFill: $("yellowIntegrityFill"),
     turnLabel: $("turnLabel"),
     windLabel: $("windLabel"),
-    blueScore: $("blueScore"),
-    redScore: $("redScore"),
+    scoreboardStrip: $("scoreboardStrip"),
     roundNumber: $("roundNumber"),
     canvasFrame: $("canvasFrame"),
     canvas: $("gameCanvas"),
@@ -123,6 +162,7 @@
     powerIncreaseButton: $("powerIncreaseButton"),
     fireButton: $("fireButton"),
     doubleStrikeButton: $("doubleStrikeButton"),
+    chatToolButton: $("chatToolButton"),
     armouryToolButton: $("armouryToolButton"),
     localCreditsLabel: $("localCreditsLabel"),
     armouryTeamBadge: $("armouryTeamBadge"),
@@ -166,14 +206,27 @@
     leaveGameButton: $("leaveGameButton")
   };
 
+  const teamDom = {
+    blue: { card: dom.blueTankCard, playerName: dom.bluePlayerName, tankName: dom.blueTankName, role: dom.blueRoleLabel, loadout: dom.blueLoadout, recent: dom.blueRecentActions, hits: dom.blueHits, credits: dom.blueCredits, canvas: dom.blueStatusTankCanvas, integrityLabel: dom.blueIntegrityLabel, integrityFill: dom.blueIntegrityFill },
+    red: { card: dom.redTankCard, playerName: dom.redPlayerName, tankName: dom.redTankName, role: dom.redRoleLabel, loadout: dom.redLoadout, recent: dom.redRecentActions, hits: dom.redHits, credits: dom.redCredits, canvas: dom.redStatusTankCanvas, integrityLabel: dom.redIntegrityLabel, integrityFill: dom.redIntegrityFill },
+    green: { card: dom.greenTankCard, playerName: dom.greenPlayerName, tankName: dom.greenTankName, role: dom.greenRoleLabel, loadout: dom.greenLoadout, recent: dom.greenRecentActions, hits: dom.greenHits, credits: dom.greenCredits, canvas: dom.greenStatusTankCanvas, integrityLabel: dom.greenIntegrityLabel, integrityFill: dom.greenIntegrityFill },
+    yellow: { card: dom.yellowTankCard, playerName: dom.yellowPlayerName, tankName: dom.yellowTankName, role: dom.yellowRoleLabel, loadout: dom.yellowLoadout, recent: dom.yellowRecentActions, hits: dom.yellowHits, credits: dom.yellowCredits, canvas: dom.yellowStatusTankCanvas, integrityLabel: dom.yellowIntegrityLabel, integrityFill: dom.yellowIntegrityFill }
+  };
+
   let ctx = dom.canvas.getContext("2d");
   const staticCanvas = document.createElement("canvas");
   const staticCtx = staticCanvas.getContext("2d", { alpha: false });
 
   let peer = null;
-  let connection = null;
-  let pendingConnection = null;
+  let connection = null; // guest-to-host connection
+  let pendingConnection = null; // currently displayed host join request
+  const pendingJoinQueue = [];
+  const hostConnections = new Map();
   let role = null;
+  let localTeamId = "blue";
+  let localProfile = { playerName: "Player", tankName: "Tank" };
+  let lobbyRoster = {};
+  let battleStarted = false;
   let accepted = false;
   let acceptRequested = false;
   let guestReadyTimer = null;
@@ -208,7 +261,7 @@
   let pendingArmAfterPurchase = null;
   let teleportMode = false;
   let currentScreen = "home";
-  const recentPlayerActions = { blue: [], red: [] };
+  const recentPlayerActions = { blue: [], red: [], green: [], yellow: [] };
   const aimDrag = { active: false, pointerId: null };
   const inspectionCamera = {
     active: false,
@@ -254,13 +307,13 @@
     const packet = deepClone(metadata);
     const settings = packet.settings;
     const terrain = generateTerrain(settings, packet.seed);
+    const teams = Array.isArray(packet.activeTeams) && packet.activeTeams.length ? packet.activeTeams : ["blue", "red"];
     const spawnPositions = packet.spawnPositions
       ? deepClone(packet.spawnPositions)
-      : chooseSpawnPositions(terrain, settings, packet.seed);
+      : chooseSpawnPositions(terrain, settings, packet.seed, teams);
     guaranteeSpawnHeightDifference(terrain, spawnPositions, settings);
     const padRadius = Math.max(6.5, 9.2 * (settings.tankSize / 100));
-    flattenTerrain(terrain, spawnPositions.blue, settings.worldWidth, padRadius);
-    flattenTerrain(terrain, spawnPositions.red, settings.worldWidth, padRadius);
+    for (const team of teams) flattenTerrain(terrain, spawnPositions[team], settings.worldWidth, padRadius);
     const ceiling = settings.location === "cave"
       ? generateCaveCeiling(terrain, settings, packet.seed)
       : null;
@@ -326,7 +379,7 @@
     }
   }
 
-  function receiveNetworkChunk(packet) {
+  function receiveNetworkChunk(packet, sourceConnection = connection) {
     if (typeof packet.transferId !== "string" || !Number.isInteger(packet.index) || !Number.isInteger(packet.total)) return;
     if (packet.total < 1 || packet.total > 2000 || packet.index < 0 || packet.index >= packet.total || typeof packet.chunk !== "string") return;
 
@@ -342,7 +395,8 @@
         received: 0,
         total: packet.total,
         payloadType: packet.payloadType || "message",
-        startedAt: now
+        startedAt: now,
+        sourceConnection
       };
       incomingTransfers.set(packet.transferId, transfer);
     }
@@ -367,7 +421,7 @@
 
     try {
       const restored = JSON.parse(transfer.chunks.join(""));
-      handleNetworkData(restored);
+      handleNetworkData(restored, transfer.sourceConnection);
     } catch (error) {
       console.error("Unable to rebuild network message", error);
       const message = "Battlefield transfer was incomplete. Retrying…";
@@ -384,6 +438,83 @@
 
   function cleanCode(value) {
     return value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
+  }
+
+  function cleanProfileText(value, fallback, max = 18) {
+    const cleaned = String(value || "").replace(/[<>\n\r]/g, "").trim().slice(0, max);
+    return cleaned || fallback;
+  }
+
+  function readLocalProfile() {
+    return {
+      playerName: cleanProfileText(dom.playerNameInput?.value, "Player"),
+      tankName: cleanProfileText(dom.tankNameInput?.value, "Tank")
+    };
+  }
+
+  function stateTeams(state = gameState) {
+    const teams = Array.isArray(state?.activeTeams) ? state.activeTeams.filter(team => TEAM_ORDER.includes(team)) : ["blue", "red"];
+    return teams.length ? teams : ["blue", "red"];
+  }
+
+  function playerProfile(team, state = gameState) {
+    return state?.players?.[team] || lobbyRoster?.[team] || { playerName: TEAM_NAMES[team], tankName: `${TEAM_NAMES[team]} tank` };
+  }
+
+  function playerLabel(team, state = gameState) {
+    return cleanProfileText(playerProfile(team, state).playerName, TEAM_NAMES[team]);
+  }
+
+  function tankLabel(team, state = gameState) {
+    return cleanProfileText(playerProfile(team, state).tankName, `${TEAM_NAMES[team]} tank`);
+  }
+
+  function defaultAimForTeam(team, state = gameState) {
+    const tankX = Number(state?.tanks?.[team]?.x);
+    const width = Number(state?.settings?.worldWidth);
+    if (Number.isFinite(tankX) && Number.isFinite(width)) return tankX < width / 2 ? 45 : -45;
+    const index = Math.max(0, stateTeams(state).indexOf(team));
+    return index < Math.ceil(stateTeams(state).length / 2) ? 45 : -45;
+  }
+
+  function nextAliveTeam(state, fromTeam) {
+    const teams = stateTeams(state);
+    const start = Math.max(0, teams.indexOf(fromTeam));
+    for (let offset = 1; offset <= teams.length; offset += 1) {
+      const team = teams[(start + offset) % teams.length];
+      if (state.tanks?.[team]?.alive) return team;
+    }
+    return fromTeam;
+  }
+
+  function connectionRecordFor(conn) {
+    for (const record of hostConnections.values()) if (record.conn === conn) return record;
+    return null;
+  }
+
+  function hostTeamForConnection(conn) {
+    return connectionRecordFor(conn)?.team || null;
+  }
+
+  function broadcastNetwork(payload, exceptConnection = null) {
+    let sent = false;
+    for (const record of hostConnections.values()) {
+      if (!record.accepted || record.conn === exceptConnection || !record.conn?.open) continue;
+      sent = sendNetwork(payload, record.conn) || sent;
+    }
+    return sent;
+  }
+
+  function sendToTeam(team, payload) {
+    for (const record of hostConnections.values()) {
+      if (record.team === team && record.conn?.open) return sendNetwork(payload, record.conn);
+    }
+    return false;
+  }
+
+  function availableGuestTeam() {
+    const used = new Set(Array.from(hostConnections.values()).filter(record => record.accepted).map(record => record.team));
+    return GUEST_TEAMS.find(team => !used.has(team)) || null;
   }
 
   function mulberry32(seed) {
@@ -419,7 +550,10 @@
   }
 
   function hasLiveSession() {
-    return Boolean(gameState && (role === "bot" || (accepted && connection && connection.open)));
+    if (!gameState) return false;
+    if (role === "bot") return true;
+    if (role === "host") return Array.from(hostConnections.values()).some(record => record.accepted && record.conn?.open);
+    return Boolean(accepted && connection?.open);
   }
 
   function placePersistentChat(screenName = currentScreen) {
@@ -444,7 +578,8 @@
     dom.botButton.disabled = live;
     dom.joinButton.disabled = live;
     if (!live) return;
-    const opponent = role === "bot" ? "computer opponent" : "other player";
+    const others = Math.max(1, stateTeams().length - 1);
+    const opponent = role === "bot" ? "computer opponent" : `${others} other player${others === 1 ? "" : "s"}`;
     dom.connectedMenuTitle.textContent = role === "bot" ? "Bot match paused" : "Still connected";
     dom.connectedMenuText.textContent = `Your ${opponent} and battle chat remain available. Edit the rules below, then apply them for a fresh round.`;
     dom.resumeBattleButton.disabled = !gameState;
@@ -491,7 +626,7 @@
   }
 
   function recordPlayerActionFromEvent(message) {
-    const match = /^(Blue|Red)\s+(.+?)(?:\.|$)/.exec(String(message || ""));
+    const match = /^(Blue|Red|Green|Yellow)\s+(.+?)(?:\.|$)/.exec(String(message || ""));
     if (!match) return;
     const team = match[1].toLowerCase();
     let action = match[2]
@@ -507,7 +642,7 @@
   }
 
   function renderRecentPlayerActions(team) {
-    const container = team === "blue" ? dom.blueRecentActions : dom.redRecentActions;
+    const container = teamDom[team]?.recent;
     if (!container) return;
     const actions = recentPlayerActions[team];
     container.replaceChildren();
@@ -670,8 +805,8 @@
 
   function normaliseAimAngle(team, angle, version = 10) {
     const value = Number(angle);
-    if (!Number.isFinite(value)) return team === "red" ? -45 : 45;
-    if (version < 10 && value >= 0 && value <= 180) return team === "red" ? -Math.abs(value) : Math.abs(value);
+    if (!Number.isFinite(value)) return (team === "green" || team === "yellow") ? -45 : 45;
+    if (version < 10 && value >= 0 && value <= 180) return (team === "green" || team === "yellow") ? -Math.abs(value) : Math.abs(value);
     return clamp(value, -85, 85);
   }
 
@@ -740,21 +875,75 @@
     });
 
     instance.on("disconnected", () => {
-      if (isResetting || (connection && connection.open)) return;
+      if (isResetting || connection?.open || (role === "host" && Array.from(hostConnections.values()).some(record => record.conn?.open))) return;
       setConnectionStatus("Introduction lost", "error");
       addLobbyLog("The introduction service disconnected before the direct link was ready.");
     });
   }
 
+  function updateLobbyRosterUI() {
+    if (!dom.lobbyRoster) return;
+    dom.lobbyRoster.replaceChildren();
+    const entries = TEAM_ORDER.filter(team => lobbyRoster[team]).map(team => [team, lobbyRoster[team]]);
+    for (const [team, profile] of entries) {
+      const row = document.createElement("div");
+      row.className = `lobby-player ${team}`;
+      const swatch = document.createElement("span");
+      swatch.className = `team-swatch ${team}`;
+      const copy = document.createElement("div");
+      const name = document.createElement("strong");
+      const tank = document.createElement("small");
+      name.textContent = cleanProfileText(profile.playerName, TEAM_NAMES[team]);
+      tank.textContent = `${cleanProfileText(profile.tankName, `${TEAM_NAMES[team]} tank`)} · ${TEAM_NAMES[team]}`;
+      copy.append(name, tank);
+      const status = document.createElement("span");
+      status.className = "lobby-player-status";
+      status.textContent = team === localTeamId ? "YOU" : team === "blue" ? "HOST" : "READY";
+      row.append(swatch, copy, status);
+      dom.lobbyRoster.appendChild(row);
+    }
+    if (dom.lobbyPlayerCount) dom.lobbyPlayerCount.textContent = `${entries.length} / 4`;
+    if (dom.startBattleButton) {
+      const canStart = role === "host" && entries.length >= 2 && !battleStarted;
+      dom.startBattleButton.classList.toggle("hidden", !canStart);
+      dom.startBattleButton.disabled = !canStart;
+    }
+  }
+
+  function showNextJoinRequest() {
+    if (role !== "host") return;
+    if (pendingConnection || !pendingJoinQueue.length) {
+      if (!pendingConnection) dom.incomingRequest.classList.add("hidden");
+      return;
+    }
+    pendingConnection = pendingJoinQueue.shift();
+    const profile = pendingConnection.profile;
+    dom.incomingRequestTitle.textContent = `${profile.playerName} wants to join`;
+    dom.incomingRequestMeta.textContent = `Tank: ${profile.tankName}. Accept to assign the next available colour.`;
+    dom.incomingRequest.classList.remove("hidden");
+    dom.lobbyTitle.textContent = "Incoming player";
+    setConnectionStatus("Approval required", "waiting");
+    playIncomingChatSound();
+  }
+
   function startHost() {
     if (!libraryAvailable()) return;
     resetTransientState(false);
+    safelyDestroyPeer();
+    hostConnections.clear();
+    pendingJoinQueue.length = 0;
+    pendingConnection = null;
     role = "host";
+    localTeamId = "blue";
+    localProfile = readLocalProfile();
+    lobbyRoster = { blue: deepClone(localProfile) };
     accepted = false;
+    battleStarted = false;
     const settings = readSettings();
     renderRulesSummary(settings);
-    dom.lobbyTitle.textContent = "Waiting for a challenger";
-    dom.lobbyMessage.textContent = "Share the code. The match data will travel directly between browsers.";
+    updateLobbyRosterUI();
+    dom.lobbyTitle.textContent = "Waiting for players";
+    dom.lobbyMessage.textContent = "Share the code. You can begin with two, three or four players.";
     dom.roomCodeWrap.classList.remove("hidden");
     dom.incomingRequest.classList.add("hidden");
     setScreen("lobby");
@@ -767,21 +956,29 @@
     commonPeerEvents(peer);
 
     peer.on("open", () => {
-      setConnectionStatus("Waiting for guest", "waiting");
+      setConnectionStatus("Waiting for players", "waiting");
       addLobbyLog(`Host ready. Share code ${code}.`);
     });
 
     peer.on("connection", (incoming) => {
-      if (connection || pendingConnection) {
-        incoming.close();
+      const occupied = Array.from(hostConnections.values()).filter(record => record.accepted).length + pendingJoinQueue.length + (pendingConnection ? 1 : 0);
+      if (battleStarted || occupied >= 3) {
+        incoming.on("open", () => {
+          sendNetwork({ type: "room-full", message: battleStarted ? "The battle has already started." : "This room already has four players." }, incoming);
+          setTimeout(() => incoming.close(), 120);
+        });
         return;
       }
-      pendingConnection = incoming;
+      const rawProfile = incoming.metadata?.profile || {};
+      const profile = {
+        playerName: cleanProfileText(rawProfile.playerName, `Player ${occupied + 2}`),
+        tankName: cleanProfileText(rawProfile.tankName, `Tank ${occupied + 2}`)
+      };
+      const record = { conn: incoming, profile, accepted: false, team: null };
+      pendingJoinQueue.push(record);
       wireConnection(incoming);
-      dom.incomingRequest.classList.remove("hidden");
-      dom.lobbyTitle.textContent = "Incoming challenger";
-      setConnectionStatus("Approval required", "waiting");
-      addLobbyLog("A guest has reached the host. Accept or decline.");
+      addLobbyLog(`${profile.playerName} reached the host and is waiting for approval.`);
+      showNextJoinRequest();
     });
   }
 
@@ -796,10 +993,16 @@
     }
 
     resetTransientState(false);
+    safelyDestroyPeer();
     role = "guest";
+    localTeamId = "red";
+    localProfile = readLocalProfile();
+    lobbyRoster = {};
     accepted = false;
+    battleStarted = false;
+    updateLobbyRosterUI();
     dom.lobbyTitle.textContent = "Contacting host";
-    dom.lobbyMessage.textContent = "The host must approve the connection before the battle begins.";
+    dom.lobbyMessage.textContent = "The host must approve you before the battle begins.";
     dom.roomCodeWrap.classList.add("hidden");
     dom.incomingRequest.classList.add("hidden");
     dom.rulesSummary.innerHTML = '<div class="rule-chip"><span>Rules</span><strong>Waiting for host</strong></div>';
@@ -813,7 +1016,7 @@
       const outgoing = peer.connect(PREFIX + code, {
         reliable: true,
         serialization: "binary",
-        metadata: { application: "red-blue-tanks", version: APP_VERSION, request: "join" }
+        metadata: { application: "red-blue-tanks", version: APP_VERSION, request: "join", profile: localProfile }
       });
       connection = outgoing;
       wireConnection(outgoing);
@@ -828,31 +1031,54 @@
         setConnectionStatus("Awaiting host", "waiting");
         addLobbyLog("Direct peer channel opened. Waiting for approval.");
       } else {
-        addLobbyLog("Direct data channel is ready.");
-        if (acceptRequested) finalizeGuestAcceptance();
+        addLobbyLog("A direct player channel is ready.");
+        if (pendingConnection?.conn === conn && pendingConnection.awaitAccept) acceptGuest();
       }
     });
 
-    conn.on("data", handleNetworkData);
+    conn.on("data", data => handleNetworkData(data, conn));
 
     conn.on("close", () => {
       if (isResetting) return;
+      if (role === "host") {
+        if (pendingConnection?.conn === conn) {
+          addLobbyLog(`${pendingConnection.profile.playerName} left before approval.`);
+          pendingConnection = null;
+          showNextJoinRequest();
+          return;
+        }
+        const queuedIndex = pendingJoinQueue.findIndex(item => item.conn === conn);
+        if (queuedIndex >= 0) pendingJoinQueue.splice(queuedIndex, 1);
+        const record = connectionRecordFor(conn);
+        if (record) {
+          hostConnections.delete(conn.peer);
+          delete lobbyRoster[record.team];
+          updateLobbyRosterUI();
+          if (gameState?.tanks?.[record.team]) {
+            gameState.tanks[record.team].alive = false;
+            gameState.tanks[record.team].disconnected = true;
+            if (gameState.turn === record.team && !gameState.winner) gameState.turn = nextAliveTeam(gameState, record.team);
+            addEvent(`${playerLabel(record.team)} disconnected.`, "error");
+            broadcastState(`${playerLabel(record.team)} disconnected.`);
+            updateGameUI(true);
+          } else addLobbyLog(`${record.profile.playerName} left the lobby.`);
+        }
+        accepted = hostConnections.size > 0;
+        return;
+      }
       clearGuestReadyHandshake();
       accepted = false;
       connection = null;
-      pendingConnection = null;
-      setConnectionStatus("Other player left", "error");
+      setConnectionStatus("Host connection closed", "error");
       updateMenuSessionUI();
       placePersistentChat(currentScreen);
       if (currentScreen === "game") {
-        addEvent("The other player disconnected.", "error");
-        showCanvasMessage("OPPONENT DISCONNECTED");
+        addEvent("The host disconnected.", "error");
+        showCanvasMessage("HOST DISCONNECTED");
         updateGameControls();
-      } else if (currentScreen === "home") {
-        addChatMessage("System", "The other player disconnected.", false);
       } else {
         dom.lobbyTitle.textContent = "Connection closed";
-        dom.lobbyMessage.textContent = "Return to the start screen and create or join another room.";
+        dom.lobbyMessage.textContent = "Return to the start screen and join another room.";
         addLobbyLog("The peer-to-peer connection closed.");
       }
     });
@@ -862,30 +1088,72 @@
       console.error(error);
       setConnectionStatus("Peer link error", "error");
       const message = `Peer link error: ${error.message || error.type || "unknown"}`;
-      if (!dom.gameScreen.classList.contains("hidden")) addEvent(message, "error");
-      else addLobbyLog(message);
+      if (currentScreen === "game") addEvent(message, "error"); else addLobbyLog(message);
     });
   }
 
-  function handleNetworkData(data) {
+  function handleNetworkData(data, sourceConnection = connection) {
     if (!data || typeof data !== "object") return;
     if (data.type === "network-chunk") {
-      receiveNetworkChunk(data);
+      receiveNetworkChunk(data, sourceConnection);
       return;
+    }
+
+    if (role === "host") {
+      const sourceTeam = hostTeamForConnection(sourceConnection);
+      if (data.type === "input" && sourceTeam) {
+        handleGuestInput(data, sourceTeam, sourceConnection);
+        return;
+      }
+      if (data.type === "chat" && sourceTeam) {
+        const text = String(data.text || "").trim().slice(0, 180);
+        if (!text) return;
+        addChatMessage(playerLabel(sourceTeam), text);
+        broadcastNetwork({ type: "chat", sender: sourceTeam, text }, sourceConnection);
+        playIncomingChatSound();
+        return;
+      }
+      if (data.type === "action-request" && sourceTeam) {
+        data.sender = sourceTeam;
+        receiveActionRequest(data);
+        return;
+      }
+      if (data.type === "action-response" && sourceTeam) {
+        receiveActionResponse({ ...data, sender: sourceTeam });
+        return;
+      }
+      if (data.type === "game-init-ack") {
+        addEvent(`${playerLabel(sourceTeam)} confirmed the battlefield.`);
+        return;
+      }
     }
 
     switch (data.type) {
       case "accepted":
         if (role !== "guest") return;
         accepted = true;
-        initialGameToken = data.token || null;
-        receivedInitialGameToken = null;
-        renderRulesSummary(data.settings);
-        dom.lobbyTitle.textContent = "Host accepted";
-        dom.lobbyMessage.textContent = "Preparing the battlefield…";
-        setConnectionStatus("Connected directly", "online");
-        addLobbyLog("Host accepted the connection. Confirming battlefield transfer…");
-        beginGuestReadyHandshake();
+        localTeamId = TEAM_ORDER.includes(data.team) ? data.team : "red";
+        lobbyRoster = deepClone(data.roster || {});
+        renderRulesSummary(data.settings || readSettings());
+        updateLobbyRosterUI();
+        dom.lobbyTitle.textContent = `Joined as ${TEAM_NAMES[localTeamId]}`;
+        dom.lobbyMessage.textContent = "Waiting for the host to start the battle.";
+        setConnectionStatus("Connected · waiting", "online");
+        addLobbyLog(`Host accepted you as ${TEAM_NAMES[localTeamId]}.`);
+        break;
+
+      case "roster":
+        if (role !== "guest") return;
+        lobbyRoster = deepClone(data.roster || lobbyRoster);
+        updateLobbyRosterUI();
+        break;
+
+      case "room-full":
+        if (role !== "guest") return;
+        dom.lobbyTitle.textContent = "Unable to join";
+        dom.lobbyMessage.textContent = data.message || "The room is full.";
+        setConnectionStatus("Room unavailable", "error");
+        addLobbyLog(data.message || "The room is full.");
         break;
 
       case "declined":
@@ -896,43 +1164,20 @@
         addLobbyLog("The host declined the join request.");
         break;
 
-      case "guest-ready":
-        if (role !== "host" || !accepted || !connection?.open || !gameState) return;
-        if (data.token && initialGameToken && data.token !== initialGameToken) return;
-        sendInitialGameState();
-        break;
-
       case "game-init":
         if (role !== "guest") return;
-        if (initialGameToken && data.token && data.token !== initialGameToken) return;
-        clearGuestReadyHandshake();
-        if (receivedInitialGameToken && receivedInitialGameToken === data.token) {
-          sendNetwork({ type: "game-init-ack", token: data.token });
-          return;
+        {
+          const initialState = inflateFreshState(data.state);
+          if (!initialState) {
+            addLobbyLog("The battlefield descriptor was invalid.");
+            return;
+          }
+          lobbyRoster = deepClone(initialState.players || lobbyRoster);
+          battleStarted = true;
+          enterGame(initialState);
+          sendNetwork({ type: "game-init-ack" });
+          addEvent("Battlefield received from host.");
         }
-        receivedInitialGameToken = data.token || "legacy";
-        accepted = true;
-        const initialState = inflateFreshState(data.state);
-        if (!initialState) {
-          addLobbyLog("The battlefield descriptor was invalid. Requesting it again…");
-          receivedInitialGameToken = null;
-          return;
-        }
-        enterGame(initialState);
-        sendNetwork({ type: "game-init-ack", token: data.token || null });
-        addEvent("Battlefield received from host.");
-        break;
-
-      case "game-init-ack":
-        if (role !== "host") return;
-        if (data.token && initialGameToken && data.token !== initialGameToken) return;
-        lastInitialGameSendAt = 0;
-        addEvent("Guest battlefield confirmed.");
-        break;
-
-      case "input":
-        if (role !== "host" || !accepted) return;
-        handleGuestInput(data);
         break;
 
       case "state":
@@ -965,7 +1210,7 @@
       case "shot-replace":
         if (role !== "guest") return;
         replaceShotAnimation(data.packet);
-        addEvent(`${TEAM_NAMES[data.packet.shooter]} deployed the parachute.`);
+        addEvent(`${playerLabel(data.packet.shooter)} deployed the parachute.`);
         break;
 
       case "round-start":
@@ -987,8 +1232,8 @@
         break;
 
       case "chat":
-        if (typeof data.text !== "string") return;
-        addChatMessage(TEAM_NAMES[data.sender] || "Player", data.text.slice(0, 180));
+        if (role !== "guest" || typeof data.text !== "string") return;
+        addChatMessage(playerLabel(data.sender), data.text.slice(0, 180));
         playIncomingChatSound();
         break;
 
@@ -998,31 +1243,63 @@
   }
 
   function acceptGuest() {
-    if (!pendingConnection) return;
-    acceptRequested = true;
-    dom.acceptButton.disabled = true;
-    dom.acceptButton.textContent = "Accepting…";
-    if (pendingConnection.open) finalizeGuestAcceptance();
-    else addLobbyLog("Approval recorded; completing the direct data channel…");
-  }
-
-  function finalizeGuestAcceptance() {
-    if (!pendingConnection || !pendingConnection.open) return;
-    connection = pendingConnection;
-    pendingConnection = null;
-    acceptRequested = false;
-    accepted = true;
-    initialGameToken = `${Date.now().toString(36)}-${makeCode(4)}`;
-    receivedInitialGameToken = null;
+    if (!pendingConnection || role !== "host") return;
+    const record = pendingConnection;
+    if (!record.conn?.open) {
+      record.awaitAccept = true;
+      dom.acceptButton.disabled = true;
+      dom.acceptButton.textContent = "Connecting…";
+      return;
+    }
     dom.acceptButton.disabled = false;
     dom.acceptButton.textContent = "Accept";
+    const team = availableGuestTeam();
+    if (!team) {
+      sendNetwork({ type: "room-full", message: "This room already has four players." }, record.conn);
+      record.conn.close();
+      pendingConnection = null;
+      showNextJoinRequest();
+      return;
+    }
+    record.team = team;
+    record.accepted = true;
+    hostConnections.set(record.conn.peer, record);
+    lobbyRoster[team] = deepClone(record.profile);
+    pendingConnection = null;
+    accepted = true;
+    sendNetwork({ type: "accepted", team, roster: lobbyRoster, settings: readSettings() }, record.conn);
+    broadcastNetwork({ type: "roster", roster: lobbyRoster });
+    addLobbyLog(`${record.profile.playerName} accepted as ${TEAM_NAMES[team]}.`);
     dom.incomingRequest.classList.add("hidden");
+    dom.lobbyTitle.textContent = "Players assembling";
+    setConnectionStatus(`${Object.keys(lobbyRoster).length} players ready`, "online");
+    updateLobbyRosterUI();
+    showNextJoinRequest();
+  }
 
-    const settings = readSettings();
-    const state = createGameState(settings);
+  function declineGuest() {
+    if (!pendingConnection || role !== "host") return;
+    const record = pendingConnection;
+    sendNetwork({ type: "declined" }, record.conn);
+    setTimeout(() => record.conn.close(), 80);
+    pendingConnection = null;
+    dom.incomingRequest.classList.add("hidden");
+    addLobbyLog(`${record.profile.playerName}'s join request was declined.`);
+    showNextJoinRequest();
+  }
+
+  function startHostedBattle() {
+    if (role !== "host" || battleStarted) return;
+    const teams = TEAM_ORDER.filter(team => lobbyRoster[team]);
+    if (teams.length < 2) return;
+    battleStarted = true;
+    if (pendingConnection) { sendNetwork({ type: "room-full", message: "The battle has started." }, pendingConnection.conn); pendingConnection.conn.close(); pendingConnection = null; }
+    while (pendingJoinQueue.length) { const queued = pendingJoinQueue.shift(); sendNetwork({ type: "room-full", message: "The battle has started." }, queued.conn); queued.conn.close(); }
+    dom.incomingRequest.classList.add("hidden");
+    const state = createGameState(readSettings(), { activeTeams: teams, players: lobbyRoster });
+    broadcastNetwork({ type: "game-init", state: compactInitialGameState(state) });
     enterGame(state);
-    sendNetwork({ type: "accepted", settings, token: initialGameToken });
-    addEvent("Guest accepted. Waiting for battlefield confirmation…");
+    addEvent(`${teams.length}-player battle started. ${playerLabel(state.turn, state)} fires first.`);
   }
 
   function compactInitialGameState(state) {
@@ -1030,97 +1307,89 @@
   }
 
   function sendInitialGameState() {
-    if (role !== "host" || !connection?.open || !gameState) return;
-    const now = Date.now();
-    if (now - lastInitialGameSendAt < 1800) return;
-    lastInitialGameSendAt = now;
-    const payload = {
-      type: "game-init",
-      token: initialGameToken,
-      state: compactInitialGameState(gameState)
-    };
-    const sent = sendNetwork(payload);
-    if (sent) {
-      const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
-      addEvent(`Sending compact battlefield instructions (${bytes.toLocaleString()} bytes)…`);
-    }
+    if (role !== "host" || !gameState) return;
+    broadcastNetwork({ type: "game-init", state: compactInitialGameState(gameState) });
   }
 
-  function beginGuestReadyHandshake() {
-    clearGuestReadyHandshake();
-    const announceReady = () => {
-      if (role !== "guest" || !accepted || !connection?.open || gameState) {
-        clearGuestReadyHandshake();
-        return;
-      }
-      sendNetwork({ type: "guest-ready", token: initialGameToken });
-    };
-    announceReady();
-    guestReadyTimer = setInterval(announceReady, 2500);
-  }
-
+  function beginGuestReadyHandshake() {}
   function clearGuestReadyHandshake() {
     if (guestReadyTimer) clearInterval(guestReadyTimer);
     guestReadyTimer = null;
   }
 
-  function declineGuest() {
-    if (!pendingConnection) return;
-    acceptRequested = false;
-    dom.acceptButton.disabled = false;
-    dom.acceptButton.textContent = "Accept";
-    if (pendingConnection.open) sendNetwork({ type: "declined" }, pendingConnection);
-    setTimeout(() => pendingConnection && pendingConnection.close(), 80);
-    pendingConnection = null;
-    dom.incomingRequest.classList.add("hidden");
-    dom.lobbyTitle.textContent = "Waiting for a challenger";
-    setConnectionStatus("Waiting for guest", "waiting");
-    addLobbyLog("Join request declined.");
-  }
-
   function startBotGame() {
     resetTransientState(false);
     role = "bot";
+    localTeamId = "blue";
+    localProfile = readLocalProfile();
+    lobbyRoster = {
+      blue: deepClone(localProfile),
+      red: { playerName: "Computer", tankName: "Targeting Unit" }
+    };
     accepted = true;
+    battleStarted = true;
     setConnectionStatus("Computer opponent", "online");
-    const state = createGameState(readSettings());
+    const state = createGameState(readSettings(), { activeTeams: ["blue", "red"], players: lobbyRoster });
     enterGame(state);
-    addEvent("Computer opponent ready. Blue fires first.");
+    addEvent(`Computer opponent ready. ${playerLabel(state.turn, state)} fires first.`);
     addChatMessage("Computer", "Link established. Fire-control system active.", false, true);
   }
 
   function createGameState(settings, session = {}) {
     const seed = randomSeed();
+    const teams = (Array.isArray(session.activeTeams) ? session.activeTeams : ["blue", "red"]).filter(team => TEAM_ORDER.includes(team));
+    const activeTeams = teams.length >= 2 ? teams : ["blue", "red"];
+    const players = {};
+    for (const team of activeTeams) {
+      const source = session.players?.[team] || lobbyRoster?.[team] || (team === "blue" ? localProfile : null) || {};
+      players[team] = {
+        playerName: cleanProfileText(source.playerName, TEAM_NAMES[team]),
+        tankName: cleanProfileText(source.tankName, `${TEAM_NAMES[team]} tank`)
+      };
+    }
     const terrain = generateTerrain(settings, seed);
-    const spawnPositions = chooseSpawnPositions(terrain, settings, seed);
+    const spawnPositions = chooseSpawnPositions(terrain, settings, seed, activeTeams);
     guaranteeSpawnHeightDifference(terrain, spawnPositions, settings);
     const padRadius = Math.max(6.5, 9.2 * (settings.tankSize / 100));
-    flattenTerrain(terrain, spawnPositions.blue, settings.worldWidth, padRadius);
-    flattenTerrain(terrain, spawnPositions.red, settings.worldWidth, padRadius);
+    for (const team of activeTeams) flattenTerrain(terrain, spawnPositions[team], settings.worldWidth, padRadius);
     const ceiling = settings.location === "cave" ? generateCaveCeiling(terrain, settings, seed) : null;
 
-    const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
+    const scores = {};
+    const credits = {};
+    const inventory = {};
+    const upgrades = {};
+    const tanks = {};
+    for (const team of activeTeams) {
+      scores[team] = Math.max(0, Number(session.scores?.[team]) || 0);
+      credits[team] = 0;
+      inventory[team] = { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 };
+      upgrades[team] = { engine: false };
+      const x = round(spawnPositions[team], 3);
+      tanks[team] = {
+        x,
+        hits: 0,
+        alive: true,
+        angle: x < settings.worldWidth / 2 ? 45 : -45,
+        power: STANDARD_POWER
+      };
+    }
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
-    const openingTeam = roundNumber % 2 === 0 ? "red" : "blue";
-    const state = {
+    const openingTeam = activeTeams[(Math.max(1, roundNumber) - 1) % activeTeams.length];
+    return {
       version: APP_VERSION,
       seed,
       settings,
+      activeTeams,
+      players,
       terrain: terrain.map(value => round(value, 3)),
       baseTerrain: terrain.map(value => round(value, 3)),
       ceiling: ceiling ? ceiling.map(value => round(value, 3)) : null,
       baseCeiling: ceiling ? ceiling.map(value => round(value, 3)) : null,
       spawnPositions: deepClone(spawnPositions),
-      tanks: {
-        blue: { x: round(spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: STANDARD_POWER },
-        red: { x: round(spawnPositions.red, 3), hits: 0, alive: true, angle: -45, power: STANDARD_POWER }
-      },
-      credits: { blue: 0, red: 0 },
-      inventory: {
-        blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 },
-        red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }
-      },
-      upgrades: { blue: { engine: false }, red: { engine: false } },
+      tanks,
+      credits,
+      inventory,
+      upgrades,
       scores,
       round: roundNumber,
       turn: openingTeam,
@@ -1132,7 +1401,6 @@
       winner: null,
       shotNumber: 0
     };
-    return state;
   }
 
   function terrainSampleCount(settings) {
@@ -1278,43 +1546,37 @@
     return t * t * (3 - 2 * t);
   }
 
-  function chooseSpawnPositions(values, settings, seed) {
+  function chooseSpawnPositions(values, settings, seed, teams = ["blue", "red"]) {
     const random = mulberry32(seed ^ 0x51ed270b);
-    const blueCandidates = [];
-    const redCandidates = [];
-    for (let i = 0; i < 9; i += 1) {
-      blueCandidates.push(settings.worldWidth * (0.055 + random() * 0.265));
-      redCandidates.push(settings.worldWidth * (0.68 + random() * 0.265));
+    const count = Math.max(2, teams.length);
+    const spawns = {};
+    const margin = Math.max(settings.worldWidth * .055, 5);
+    const usable = settings.worldWidth - margin * 2;
+    for (let index = 0; index < teams.length; index += 1) {
+      const centre = margin + usable * ((index + .5) / count);
+      const jitter = (random() - .5) * usable / count * .34;
+      spawns[teams[index]] = clamp(centre + jitter, margin, settings.worldWidth - margin);
     }
-
-    let best = null;
-    for (const blue of blueCandidates) {
-      for (const red of redCandidates) {
-        const blueHeight = terrainAtRaw(values, blue, settings.worldWidth);
-        const redHeight = terrainAtRaw(values, red, settings.worldWidth);
-        const heightDifference = Math.abs(blueHeight - redHeight);
-        const edgeSafety = Math.min(blue / settings.worldWidth, 1 - red / settings.worldWidth);
-        const score = heightDifference * 4 + edgeSafety * 35 + (red - blue) / settings.worldWidth * 8;
-        if (!best || score > best.score) best = { blue, red, score };
-      }
-    }
-    return { blue: best.blue, red: best.red };
+    return spawns;
   }
 
   function guaranteeSpawnHeightDifference(values, spawns, settings) {
-    const blueHeight = terrainAtRaw(values, spawns.blue, settings.worldWidth);
-    const redHeight = terrainAtRaw(values, spawns.red, settings.worldWidth);
-    const difference = Math.abs(blueHeight - redHeight);
-    if (difference >= 7) return;
-    const target = blueHeight >= redHeight ? spawns.blue : spawns.red;
-    const radius = Math.max(9, settings.worldWidth * 0.035);
-    const needed = 8 - difference;
-    for (let i = 0; i < values.length; i += 1) {
-      const worldX = i / (values.length - 1) * settings.worldWidth;
-      const d = Math.abs(worldX - target);
-      if (d > radius) continue;
-      const shape = (Math.cos(d / radius * Math.PI) + 1) / 2;
-      values[i] += needed * shape;
+    const entries = Object.entries(spawns).sort((a, b) => a[1] - b[1]);
+    for (let i = 1; i < entries.length; i += 1) {
+      const [team, x] = entries[i];
+      const previousX = entries[i - 1][1];
+      const height = terrainAtRaw(values, x, settings.worldWidth);
+      const previousHeight = terrainAtRaw(values, previousX, settings.worldWidth);
+      if (Math.abs(height - previousHeight) >= 3.5) continue;
+      const radius = Math.max(7, settings.worldWidth * .025);
+      const lift = (i % 2 ? 1 : -1) * (4.2 + i * .8);
+      for (let sample = 0; sample < values.length; sample += 1) {
+        const worldX = sample / (values.length - 1) * settings.worldWidth;
+        const distance = Math.abs(worldX - x);
+        if (distance > radius) continue;
+        const shape = (Math.cos(distance / radius * Math.PI) + 1) / 2;
+        values[sample] = clamp(values[sample] + lift * shape, 5, 72);
+      }
     }
   }
 
@@ -1361,6 +1623,8 @@
 
   function enterGame(state, preserveLogs = false) {
     gameState = normalizeGameState(state);
+    lobbyRoster = deepClone(gameState.players || lobbyRoster);
+    battleStarted = true;
     animation = null;
     movementAnimation = null;
     doubleStrikeSelected = false;
@@ -1377,64 +1641,83 @@
     if (!preserveLogs) {
       dom.chatLog.replaceChildren();
       dom.eventLog.replaceChildren();
-      recentPlayerActions.blue = [];
-      recentPlayerActions.red = [];
+      for (const team of TEAM_ORDER) recentPlayerActions[team] = [];
     }
     hideCanvasMessage();
     setScreen("game");
     prepareGameplayPanels();
 
-    dom.blueRoleLabel.textContent = role === "guest" ? "HOST" : "YOU";
-    dom.redRoleLabel.textContent = role === "guest" ? "YOU" : role === "bot" ? "BOT" : "GUEST";
-    dom.connectionBadge.textContent = role === "bot" ? "LOCAL" : "P2P";
-    dom.roundControlBadge.textContent = role === "bot" ? "LOCAL" : role === "guest" ? "REQUEST" : "HOST";
+    for (const team of TEAM_ORDER) {
+      const parts = teamDom[team];
+      const active = stateTeams().includes(team);
+      parts.card?.classList.toggle("hidden", !active);
+      if (!active) continue;
+      const profile = playerProfile(team);
+      parts.playerName.textContent = profile.playerName;
+      parts.tankName.textContent = profile.tankName;
+      parts.role.textContent = team === localTeam() ? "YOU" : team === "blue" ? "HOST" : role === "bot" && team === "red" ? "BOT" : TEAM_NAMES[team].toUpperCase();
+      renderRecentPlayerActions(team);
+    }
+    dom.connectionBadge.textContent = role === "bot" ? "LOCAL" : `${stateTeams().length}P P2P`;
+    dom.roundControlBadge.textContent = role === "bot" ? "LOCAL" : role === "host" ? "HOST" : "REQUEST";
     dom.roundControlNote.textContent = role === "bot"
       ? "World changes and map resets happen immediately against the bot."
-      : "World changes, restart and regenerate require both players to agree.";
+      : "The host coordinates world changes, restarts and regenerated maps.";
     writeSettingsToMatchControls(gameState.settings);
     writeSettingsToHome(gameState.settings);
-    renderRecentPlayerActions("blue");
-    renderRecentPlayerActions("red");
-    setConnectionStatus(role === "bot" ? "Computer opponent" : "Connected directly", "online");
+    setConnectionStatus(role === "bot" ? "Computer opponent" : `${stateTeams().length} players connected`, "online");
     updateGameUI(true);
     ensureAudio();
   }
 
   function normalizeGameState(state) {
     const incomingVersion = Number.isFinite(state.version) ? state.version : 8;
-    if (!state.scores) state.scores = { blue: 0, red: 0 };
-    if (!state.credits) state.credits = { blue: 0, red: 0 };
-    if (!state.inventory) state.inventory = { blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }, red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 } };
-    if (!state.upgrades) state.upgrades = { blue: { engine: false }, red: { engine: false } };
-    for (const team of ["blue", "red"]) {
+    state.activeTeams = (Array.isArray(state.activeTeams) ? state.activeTeams : Object.keys(state.tanks || {})).filter(team => TEAM_ORDER.includes(team));
+    if (state.activeTeams.length < 2) state.activeTeams = ["blue", "red"];
+    state.players = state.players || {};
+    state.scores = state.scores || {};
+    state.credits = state.credits || {};
+    state.inventory = state.inventory || {};
+    state.upgrades = state.upgrades || {};
+    state.tanks = state.tanks || {};
+    state.spawnPositions = state.spawnPositions || {};
+    for (const team of state.activeTeams) {
+      state.players[team] = {
+        playerName: cleanProfileText(state.players[team]?.playerName, TEAM_NAMES[team]),
+        tankName: cleanProfileText(state.players[team]?.tankName, `${TEAM_NAMES[team]} tank`)
+      };
+      state.scores[team] = Math.max(0, Math.floor(Number(state.scores[team]) || 0));
       state.credits[team] = Math.max(0, Math.floor(Number(state.credits[team]) || 0));
       state.inventory[team] = { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0, ...(state.inventory[team] || {}) };
       state.upgrades[team] = { engine: false, ...(state.upgrades[team] || {}) };
+      if (!state.tanks[team]) {
+        const x = Number(state.spawnPositions[team]) || state.settings.worldWidth * ((state.activeTeams.indexOf(team) + .5) / state.activeTeams.length);
+        state.tanks[team] = { x, hits: 0, alive: true, angle: x < state.settings.worldWidth / 2 ? 45 : -45, power: STANDARD_POWER };
+      }
+      if (!Number.isFinite(state.spawnPositions[team])) state.spawnPositions[team] = state.tanks[team].x;
+      state.tanks[team].angle = normaliseAimAngle(team, state.tanks[team].angle, incomingVersion);
+      state.tanks[team].power = clamp(Number(state.tanks[team].power) || STANDARD_POWER, 18, MAX_POWER);
+      state.tanks[team].hits = Math.max(0, Math.floor(Number(state.tanks[team].hits) || 0));
+      if (typeof state.tanks[team].alive !== "boolean") state.tanks[team].alive = state.tanks[team].hits < state.settings.hitsToDestroy;
     }
     if (!Number.isFinite(state.round)) state.round = 1;
     if (!Number.isFinite(state.turnsRemaining)) state.turnsRemaining = 1;
     if (!Number.isFinite(state.movesUsedThisTurn)) state.movesUsedThisTurn = state.movedThisTurn ? 1 : 0;
     if (typeof state.bonusFromDouble !== "boolean") state.bonusFromDouble = false;
-    if (!state.spawnPositions) {
-      state.spawnPositions = { blue: state.tanks.blue.x, red: state.tanks.red.x };
-    }
     if (!state.baseTerrain) state.baseTerrain = state.terrain.slice();
     if (state.settings.location === "cave" && !state.ceiling) {
       state.ceiling = generateCaveCeiling(state.terrain, state.settings, state.seed || 1);
       state.baseCeiling = state.ceiling.slice();
     }
     if (!state.baseCeiling && state.ceiling) state.baseCeiling = state.ceiling.slice();
-    for (const team of ["blue", "red"]) {
-      state.tanks[team].angle = normaliseAimAngle(team, state.tanks[team].angle, incomingVersion);
-      state.tanks[team].power = clamp(Number(state.tanks[team].power) || STANDARD_POWER, 18, MAX_POWER);
-    }
+    if (!state.activeTeams.includes(state.turn) || !state.tanks[state.turn]?.alive) state.turn = state.activeTeams.find(team => state.tanks[team]?.alive) || state.activeTeams[0];
     state.movedThisTurn = state.movesUsedThisTurn >= maxMovesForTeam(state.turn, state);
     state.version = APP_VERSION;
     return state;
   }
 
   function localTeam() {
-    return role === "guest" ? "red" : "blue";
+    return role === "bot" ? "blue" : localTeamId;
   }
 
   function canLocalAct() {
@@ -1452,46 +1735,63 @@
   function updateGameUI(syncControls = false) {
     if (!gameState) return;
     const { settings, tanks } = gameState;
-    const turnName = TEAM_NAMES[gameState.turn].toUpperCase();
+    const turnName = playerLabel(gameState.turn).toUpperCase();
     const turnSuffix = gameState.turnsRemaining > 1 ? ` · ${gameState.turnsRemaining} SHOTS` : "";
-    dom.turnLabel.textContent = gameState.winner ? `${TEAM_NAMES[gameState.winner].toUpperCase()} WINS` : `${turnName} TURN${turnSuffix}`;
+    dom.turnLabel.textContent = gameState.winner ? `${playerLabel(gameState.winner).toUpperCase()} WINS` : `${turnName} TURN${turnSuffix}`;
     dom.windLabel.textContent = formatWind(gameState.wind);
     dom.telemetryWind.textContent = signed(gameState.wind);
     dom.telemetryGravity.textContent = settings.gravity.toFixed(2);
     dom.telemetryMove.textContent = moveStep().toFixed(1);
     dom.telemetryHits.textContent = String(settings.hitsToDestroy);
-    dom.blueScore.textContent = String(gameState.scores.blue);
-    dom.redScore.textContent = String(gameState.scores.red);
     dom.roundNumber.textContent = String(gameState.round);
-    dom.blueCredits.textContent = `${gameState.credits.blue} CR`;
-    dom.redCredits.textContent = `${gameState.credits.red} CR`;
-    dom.blueTankCard?.classList.toggle("active-turn", !gameState.winner && gameState.turn === "blue");
-    dom.redTankCard?.classList.toggle("active-turn", !gameState.winner && gameState.turn === "red");
-    updateTeamLoadout("blue");
-    updateTeamLoadout("red");
+
+    if (dom.scoreboardStrip) {
+      dom.scoreboardStrip.replaceChildren();
+      for (const team of stateTeams()) {
+        const item = document.createElement("span");
+        item.className = `score-team ${team}`;
+        item.innerHTML = `${TEAM_NAMES[team].toUpperCase()} <b>${gameState.scores[team] || 0}</b>`;
+        dom.scoreboardStrip.appendChild(item);
+      }
+      const roundItem = document.createElement("em");
+      roundItem.className = "score-round";
+      roundItem.innerHTML = `ROUND <b>${gameState.round}</b>`;
+      dom.scoreboardStrip.appendChild(roundItem);
+    }
+
+    for (const team of TEAM_ORDER) {
+      const parts = teamDom[team];
+      const active = stateTeams().includes(team);
+      parts.card?.classList.toggle("hidden", !active);
+      if (!active) continue;
+      const profile = playerProfile(team);
+      parts.playerName.textContent = profile.playerName;
+      parts.tankName.textContent = profile.tankName;
+      parts.credits.textContent = `${gameState.credits[team] || 0} CR`;
+      parts.card.classList.toggle("active-turn", !gameState.winner && gameState.turn === team);
+      parts.card.classList.toggle("destroyed", !tanks[team].alive);
+      updateTeamLoadout(team);
+      renderHitPips(parts.hits, tanks[team].hits, settings.hitsToDestroy);
+      updateIntegrityReadout(team);
+    }
     updateArmouryUI();
-    renderHitPips(dom.blueHits, tanks.blue.hits, settings.hitsToDestroy);
-    renderHitPips(dom.redHits, tanks.red.hits, settings.hitsToDestroy);
-    updateIntegrityReadout("blue");
-    updateIntegrityReadout("red");
     drawStatusTankPanels(performance.now());
 
     if (syncControls) {
       const tank = tanks[localTeam()];
-      dom.angleInput.value = tank.angle;
-      dom.powerInput.value = tank.power;
-      dom.angleOutput.textContent = formatAimAngle(tank.angle);
-      dom.powerOutput.textContent = Math.round(tank.power);
+      if (tank) {
+        dom.angleInput.value = tank.angle;
+        dom.powerInput.value = tank.power;
+        dom.angleOutput.textContent = formatAimAngle(tank.angle);
+        dom.powerOutput.textContent = Math.round(tank.power);
+      }
     }
 
     updateGameControls();
 
     if (gameState.winner && !pendingActionRequest && !localActionRequest && !winnerModalDismissed) {
-      showCanvasMessage(
-        `${TEAM_NAMES[gameState.winner].toUpperCase()} WINS`,
-        `Match score ${gameState.scores.blue}–${gameState.scores.red}`,
-        "winner"
-      );
+      const scoreText = stateTeams().map(team => `${TEAM_NAMES[team]} ${gameState.scores[team] || 0}`).join(" · ");
+      showCanvasMessage(`${playerLabel(gameState.winner).toUpperCase()} WINS`, scoreText, "winner");
     } else if (!pendingActionRequest && !localActionRequest && !gameState.winner && activeCanvasMessageMode !== "purchase") {
       hideCanvasMessage();
     }
@@ -1503,12 +1803,12 @@
   }
 
   function updateIntegrityReadout(team) {
-    if (!gameState) return;
+    if (!gameState || !gameState.tanks[team]) return;
     const hitsNeeded = Math.max(1, gameState.settings.hitsToDestroy);
     const hits = clamp(gameState.tanks[team].hits || 0, 0, hitsNeeded);
     const integrity = Math.max(0, Math.round((1 - hits / hitsNeeded) * 100));
-    const label = team === "blue" ? dom.blueIntegrityLabel : dom.redIntegrityLabel;
-    const fill = team === "blue" ? dom.blueIntegrityFill : dom.redIntegrityFill;
+    const label = teamDom[team]?.integrityLabel;
+    const fill = teamDom[team]?.integrityFill;
     if (label) label.textContent = `${integrity}%`;
     if (fill) {
       fill.style.width = `${integrity}%`;
@@ -1517,7 +1817,7 @@
   }
 
   function statusTankAngle(team, now) {
-    if (!animation || animation.packet?.shooter !== team) return gameState?.tanks?.[team]?.angle || (team === "blue" ? 45 : -45);
+    if (!animation || animation.packet?.shooter !== team) return gameState?.tanks?.[team]?.angle ?? defaultAimForTeam(team);
     if (animation.phase === "aim") {
       const p = clamp((now - animation.phaseStart) / animation.aimDuration, 0, 1);
       const eased = p < .5 ? 2 * p * p : 1 - ((-2 * p + 2) ** 2) / 2;
@@ -1528,8 +1828,7 @@
 
   function drawStatusTankPanels(now = performance.now()) {
     if (!gameState) return;
-    drawStatusTank("blue", dom.blueStatusTankCanvas, now);
-    drawStatusTank("red", dom.redStatusTankCanvas, now);
+    for (const team of stateTeams()) drawStatusTank(team, teamDom[team]?.canvas, now);
   }
 
   function drawStatusTank(team, canvas, now) {
@@ -1546,10 +1845,11 @@
       ? Math.sin(Math.PI * clamp((now - animation.phaseStart) / animation.recoilDuration, 0, 1)) * 4
       : 0;
     const scale = Math.min(width / 190, height / 72);
-    const bodyX = team === "blue" ? 60 : 130;
+    const bodyX = 95;
     const bodyY = 54;
-    const accent = team === "blue" ? "#538aa7" : "#a45d57";
-    const darkAccent = team === "blue" ? "#294b5d" : "#572f2b";
+    const colour = TEAM_COLOURS[team] || TEAM_COLOURS.blue;
+    const accent = colour.muted;
+    const darkAccent = colour.dark;
 
     context.clearRect(0, 0, width, height);
     context.save();
@@ -1646,7 +1946,7 @@
 
   function updateTeamLoadout(team) {
     if (!gameState) return;
-    const container = team === "blue" ? dom.blueLoadout : dom.redLoadout;
+    const container = teamDom[team]?.loadout;
     if (!container) return;
     const inventory = gameState.inventory?.[team] || {};
     const items = [];
@@ -1741,8 +2041,7 @@
     dom.localCreditsLabel.textContent = `${credits} CR`;
     if (dom.armouryTeamBadge) {
       dom.armouryTeamBadge.textContent = team.toUpperCase();
-      dom.armouryTeamBadge.classList.toggle("red-supply", team === "red");
-      dom.armouryTeamBadge.classList.toggle("blue-supply", team === "blue");
+      for (const colourTeam of TEAM_ORDER) dom.armouryTeamBadge.classList.toggle(`${colourTeam}-supply`, team === colourTeam);
     }
     dom.parachuteCount.textContent = String(inventory.parachute || 0);
     dom.berthaCount.textContent = String(inventory.bigBertha || 0);
@@ -1904,9 +2203,11 @@
     const minX = gameState.settings.worldWidth * 0.035;
     const maxX = gameState.settings.worldWidth * 0.965;
     let destination = clamp(Number(worldX) || gameState.tanks[team].x, minX, maxX);
-    const otherX = gameState.tanks[OTHER_TEAM[team]].x;
     const separation = tankWorldWidth() * 1.35;
-    if (Math.abs(destination - otherX) < separation) destination = clamp(otherX + (destination < otherX ? -separation : separation), minX, maxX);
+    for (const otherTeam of stateTeams().filter(candidate => candidate !== team && gameState.tanks[candidate]?.alive)) {
+      const otherX = gameState.tanks[otherTeam].x;
+      if (Math.abs(destination - otherX) < separation) destination = clamp(otherX + (destination < otherX ? -separation : separation), minX, maxX);
+    }
     gameState.inventory[team].teleport -= 1;
     gameState.tanks[team].x = round(destination, 3);
     gameState.movesUsedThisTurn = 0;
@@ -1947,15 +2248,15 @@
   function authoritativeMove(team, direction) {
     if (!gameState || animation || gameState.winner || gameState.turn !== team || gameState.movesUsedThisTurn >= maxMovesForTeam(team)) return false;
     const tank = gameState.tanks[team];
-    const other = gameState.tanks[OTHER_TEAM[team]];
     const step = moveStep() * Math.sign(direction);
     const minX = gameState.settings.worldWidth * 0.045;
     const maxX = gameState.settings.worldWidth * 0.955;
     const candidate = clamp(tank.x + step, minX, maxX);
     const safeDistance = tankWorldWidth() * 1.25;
 
-    if (Math.abs(candidate - other.x) < safeDistance) {
-      rejectGuestInput("Movement blocked by the other tank.");
+    const blocked = stateTeams().some(otherTeam => otherTeam !== team && gameState.tanks[otherTeam]?.alive && Math.abs(candidate - gameState.tanks[otherTeam].x) < safeDistance);
+    if (blocked) {
+      rejectGuestInput("Movement blocked by another tank.", team);
       return false;
     }
 
@@ -1975,9 +2276,10 @@
     return true;
   }
 
-  function rejectGuestInput(message) {
-    if (role === "host" && connection && connection.open) {
-      sendNetwork({ type: "state", state: compactStateMetadata(gameState), message });
+  function rejectGuestInput(message, team = null) {
+    if (role === "host") {
+      if (team && team !== "blue") sendToTeam(team, { type: "state", state: compactStateMetadata(gameState), message });
+      else broadcastNetwork({ type: "state", state: compactStateMetadata(gameState), message });
     }
     addEvent(message);
   }
@@ -2048,31 +2350,31 @@
     }
   }
 
-  function handleGuestInput(data) {
-    if (!gameState) return;
+  function handleGuestInput(data, team, sourceConnection = null) {
+    if (!gameState || !stateTeams().includes(team)) return;
     if (data.action === "purchase") {
-      authoritativePurchase("red", String(data.item || ""));
+      authoritativePurchase(team, String(data.item || ""));
       return;
     }
     if (data.action === "deploy-parachute") {
-      authoritativeDeployParachute("red", Number(data.progress));
+      authoritativeDeployParachute(team, Number(data.progress));
       return;
     }
     if (data.action === "use-item") {
-      authoritativeUseUtility("red", String(data.item || ""));
+      authoritativeUseUtility(team, String(data.item || ""));
       return;
     }
-    if (!gameState || gameState.turn !== "red" || animation || movementAnimation || gameState.winner) {
-      rejectGuestInput("Input ignored because it is not Red's active turn.");
+    if (gameState.turn !== team || animation || movementAnimation || gameState.winner) {
+      rejectGuestInput(`Input ignored because it is not ${playerLabel(team)}'s active turn.`, team);
       return;
     }
     if (data.action === "move") {
-      authoritativeMove("red", Number(data.direction));
+      authoritativeMove(team, Number(data.direction));
     } else if (data.action === "fire") {
-      const redAngle = angleFromAimDescriptor(data.aim, Number(data.angle));
-      authoritativeFire("red", redAngle, Number(data.power), Boolean(data.doubleStrike), String(data.weapon || "standard"));
+      const aimAngle = angleFromAimDescriptor(data.aim, Number(data.angle));
+      authoritativeFire(team, aimAngle, Number(data.power), Boolean(data.doubleStrike), String(data.weapon || "standard"));
     } else if (data.action === "teleport") {
-      authoritativeTeleport("red", Number(data.x));
+      authoritativeTeleport(team, Number(data.x));
     }
   }
 
@@ -2084,16 +2386,16 @@
     if (!gameState || animation || movementAnimation || gameState.winner || gameState.turn !== team) return;
     const safeWeapon = ["standard", "parachute", "bigBertha"].includes(weapon) ? weapon : "standard";
     if (safeWeapon !== "standard" && (gameState.inventory?.[team]?.[safeWeapon] || 0) < 1) {
-      rejectGuestInput(`${TEAM_NAMES[team]} does not own that weapon.`);
+      rejectGuestInput(`${TEAM_NAMES[team]} does not own that weapon.`, team);
       return;
     }
-    const safeAngle = clamp(Number.isFinite(angle) ? angle : (team === "red" ? -45 : 45), -85, 85);
+    const safeAngle = clamp(Number.isFinite(angle) ? angle : defaultAimForTeam(team), -85, 85);
     const safePower = clamp(Number.isFinite(power) ? power : STANDARD_POWER, 18, MAX_POWER);
     gameState.tanks[team].angle = round(safeAngle, 1);
     gameState.tanks[team].power = round(safePower, 1);
 
     const packet = createShotPacket(gameState, team, safeAngle, safePower, doubleStrike, safeWeapon, null);
-    if (role === "host" && connection && connection.open) sendNetwork({ type: "shot", packet });
+    if (role === "host") broadcastNetwork({ type: "shot", packet });
     beginShotAnimation(packet);
   }
 
@@ -2118,14 +2420,14 @@
       resultingState.tanks[hitTeam].hits += 1;
       if (resultingState.tanks[hitTeam].hits >= resultingState.settings.hitsToDestroy) resultingState.tanks[hitTeam].alive = false;
     }
-    if (hitTeams.includes(OTHER_TEAM[team])) resultingState.credits[team] += 3;
+    if (hitTeams.some(hitTeam => hitTeam !== team)) resultingState.credits[team] += 3;
 
-    const aliveTeams = ["blue", "red"].filter(candidate => resultingState.tanks[candidate].alive);
+    const aliveTeams = stateTeams(resultingState).filter(candidate => resultingState.tanks[candidate].alive);
     if (aliveTeams.length === 1) {
       resultingState.winner = aliveTeams[0];
       resultingState.scores[resultingState.winner] += 1;
     } else if (aliveTeams.length === 0) {
-      resultingState.winner = OTHER_TEAM[team];
+      resultingState.winner = team;
       resultingState.scores[resultingState.winner] += 1;
     }
 
@@ -2164,7 +2466,7 @@
     const safeProgress = clamp(Number(progress) || 0.25, 0.03, 0.97);
     const deployTime = clamp(oldPacket.flightTime * safeProgress, 0.12, Math.max(0.14, oldPacket.flightTime - 0.04));
     const packet = createShotPacket(gameState, team, oldPacket.angle, oldPacket.power, false, "parachute", deployTime);
-    if (role === "host" && connection && connection.open) sendNetwork({ type: "shot-replace", packet, progress: safeProgress });
+    if (role === "host") broadcastNetwork({ type: "shot-replace", packet, progress: safeProgress });
     replaceShotAnimation(packet);
     addEvent(`${TEAM_NAMES[team]} deployed the parachute.`);
   }
@@ -2185,20 +2487,20 @@
   }
 
   function advanceTurnAfterShot(state, shooter, doubleTurnPenalty) {
-    const opponent = OTHER_TEAM[shooter];
+    const next = nextAliveTeam(state, shooter);
     if (doubleTurnPenalty && state.bonusFromDouble) {
-      state.turn = opponent;
+      state.turn = next;
       state.turnsRemaining = 1;
       state.bonusFromDouble = false;
     } else if (!doubleTurnPenalty && state.turnsRemaining > 1) {
       state.turn = shooter;
       state.turnsRemaining -= 1;
     } else {
-      state.turn = opponent;
+      state.turn = next;
       state.turnsRemaining = doubleTurnPenalty ? 2 : 1;
       state.bonusFromDouble = doubleTurnPenalty;
     }
-    state.credits[state.turn] += 1;
+    state.credits[state.turn] = (state.credits[state.turn] || 0) + 1;
   }
 
   function shotBlastRadius(state, doubleStrike = false, weapon = "standard") {
@@ -2208,7 +2510,7 @@
 
   function blastHitTeams(state, impact, radius) {
     const hitTeams = [];
-    for (const team of ["blue", "red"]) {
+    for (const team of stateTeams(state)) {
       if (!state.tanks[team].alive) continue;
       const center = tankCenter(state, team);
       if (Math.hypot(impact.x - center.x, impact.y - center.y) <= radius + tankCollisionRadius(state)) {
@@ -2269,7 +2571,7 @@
         return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null, flightTime: elapsed, parachuteDeployIndex };
       }
 
-      for (const checkedTeam of ["blue", "red"]) {
+      for (const checkedTeam of stateTeams(state)) {
         if (checkedTeam === team && step < 14) continue;
         const center = tankCenter(state, checkedTeam);
         const radius = tankCollisionRadius(state);
@@ -2524,9 +2826,7 @@
   }
 
   function broadcastState(message = "", movement = null) {
-    if (role === "host" && connection && connection.open) {
-      sendNetwork({ type: "state", state: compactStateMetadata(gameState), message, movement });
-    }
+    if (role === "host") broadcastNetwork({ type: "state", state: compactStateMetadata(gameState), message, movement });
   }
 
   function startMovementAnimation(team, fromX, toX, local = false) {
@@ -2653,14 +2953,16 @@
         addChatMessage("Computer", replies[Math.floor(Math.random() * replies.length)], false, true);
         playIncomingChatSound();
       }, 650);
-    } else if (connection && connection.open && accepted) {
+    } else if (role === "host") {
+      broadcastNetwork({ type: "chat", sender: team, text });
+    } else if (connection?.open && accepted) {
       sendNetwork({ type: "chat", sender: team, text });
     }
     playOutgoingChatSound();
   }
 
   function parsePurchaseMessage(message) {
-    const match = /^(Blue|Red) bought (.+) for (\d+) credits\.$/.exec(String(message || ""));
+    const match = /^(Blue|Red|Green|Yellow) bought (.+) for (\d+) credits\.$/.exec(String(message || ""));
     if (!match) return null;
     return { team: match[1].toLowerCase(), name: match[2], cost: Number(match[3]) };
   }
@@ -2747,18 +3049,18 @@
   function requestRoundAction(action, payload = {}) {
     if (!gameState || animation || movementAnimation || pendingActionRequest || localActionRequest) return;
 
-    if (role === "bot") {
+    if (role === "bot" || role === "host") {
       executeRoundAction(action, payload);
       return;
     }
 
-    if (!connection || !connection.open || !accepted) return;
+    if (!connection?.open || !accepted) return;
     localActionRequest = { action, payload };
     sendNetwork({ type: "action-request", action, payload, sender: localTeam() });
     if (currentScreen !== "game") setScreen("game");
     showCanvasMessage(
       `${action === "replay" ? "REPLAY" : "BATTLEFIELD"} REQUESTED`,
-      `Waiting for ${TEAM_NAMES[OTHER_TEAM[localTeam()]]} to accept.`,
+      "Waiting for the host to approve.",
       "waiting"
     );
     addEvent(`You requested to ${actionLabel(action, payload)}.`);
@@ -2788,13 +3090,13 @@
   }
 
   function receiveActionRequest(data) {
-    if (!gameState || !accepted || !["restart", "regenerate", "replay", "change-world", "change-settings"].includes(data.action)) return;
+    if (!gameState || role !== "host" || !["restart", "regenerate", "replay", "change-world", "change-settings"].includes(data.action)) return;
     if (pendingActionRequest || localActionRequest) {
-      sendNetwork({ type: "action-response", action: data.action, accepted: false, reason: "busy" });
+      sendToTeam(data.sender, { type: "action-response", action: data.action, accepted: false, reason: "busy" });
       return;
     }
     pendingActionRequest = { action: data.action, payload: data.payload || {}, sender: data.sender };
-    const requester = TEAM_NAMES[data.sender] || "Opponent";
+    const requester = playerLabel(data.sender);
     if (currentScreen !== "game") setScreen("game");
     showCanvasMessage(
       `${requester.toUpperCase()} REQUESTS A CHANGE`,
@@ -2806,50 +3108,34 @@
   }
 
   function acceptActionRequest() {
-    if (!pendingActionRequest) return;
-    const { action, payload } = pendingActionRequest;
+    if (!pendingActionRequest || role !== "host") return;
+    const { action, payload, sender } = pendingActionRequest;
     pendingActionRequest = null;
-    sendNetwork({ type: "action-response", action, accepted: true });
-
-    if (role === "host") {
-      executeRoundAction(action, payload);
-    } else {
-      showCanvasMessage("REQUEST ACCEPTED", "The host is preparing the battlefield.", "waiting");
-    }
+    sendToTeam(sender, { type: "action-response", action, accepted: true });
+    executeRoundAction(action, payload);
   }
 
   function declineActionRequest() {
-    if (!pendingActionRequest) return;
-    const { action } = pendingActionRequest;
+    if (!pendingActionRequest || role !== "host") return;
+    const { action, sender } = pendingActionRequest;
     pendingActionRequest = null;
-    sendNetwork({ type: "action-response", action, accepted: false });
-    addEvent("Replay or battlefield request declined.");
-    dom.gameLocationSelect.value = gameState.settings.location;
-    if (gameState?.winner) updateGameUI(false);
-    else hideCanvasMessage();
+    sendToTeam(sender, { type: "action-response", action, accepted: false });
+    addEvent("Battlefield request declined.");
+    if (gameState?.winner) updateGameUI(false); else hideCanvasMessage();
     updateGameControls();
   }
 
   function receiveActionResponse(data) {
-    if (!localActionRequest || data.action !== localActionRequest.action) return;
-    const request = localActionRequest;
+    if (role !== "guest" || !localActionRequest || data.action !== localActionRequest.action) return;
     if (!data.accepted) {
       localActionRequest = null;
       addEvent("Your request was declined.", "error");
-      dom.gameLocationSelect.value = gameState.settings.location;
-      if (gameState?.winner) updateGameUI(false);
-      else hideCanvasMessage();
+      if (gameState?.winner) updateGameUI(false); else hideCanvasMessage();
       updateGameControls();
       return;
     }
-
     addEvent("Your request was accepted.");
-    if (role === "host") {
-      localActionRequest = null;
-      executeRoundAction(request.action, request.payload);
-    } else {
-      showCanvasMessage("REQUEST ACCEPTED", "The host is preparing the battlefield.", "waiting");
-    }
+    showCanvasMessage("REQUEST ACCEPTED", "The host is preparing the battlefield.", "waiting");
   }
 
   function executeRoundAction(action, payload = {}) {
@@ -2867,23 +3153,21 @@
     } else if (action === "change-world") {
       const location = LOCATION_PRESETS[payload.location] ? payload.location : gameState.settings.location;
       const settings = locationSettings(location, gameState.settings);
-      state = createGameState(settings, { scores, round: nextRound });
+      state = createGameState(settings, { scores, round: nextRound, activeTeams: stateTeams(), players: gameState.players });
       message = `Round ${nextRound}: world changed to ${LOCATION_PRESETS[location].label}.`;
     } else if (action === "change-settings") {
       const settings = sanitiseSettings(payload.settings || gameState.settings);
-      state = createGameState(settings, { scores, round: nextRound });
+      state = createGameState(settings, { scores, round: nextRound, activeTeams: stateTeams(), players: gameState.players });
       message = `Round ${nextRound}: new match settings applied.`;
     } else {
-      state = createGameState(gameState.settings, { scores, round: nextRound });
+      state = createGameState(gameState.settings, { scores, round: nextRound, activeTeams: stateTeams(), players: gameState.players });
       message = `Round ${nextRound}: a new battlefield was generated.`;
     }
-    message += ` ${TEAM_NAMES[state.turn]} has the opening shot.`;
+    message += ` ${playerLabel(state.turn, state)} has the opening shot.`;
 
     pendingActionRequest = null;
     localActionRequest = null;
-    if (role === "host" && connection && connection.open) {
-      sendNetwork({ type: "round-start", state: compactStateMetadata(state), message });
-    }
+    if (role === "host") broadcastNetwork({ type: "round-start", state: compactStateMetadata(state), message });
     enterGame(state, true);
     playRoundSound();
     addEvent(message);
@@ -2893,15 +3177,19 @@
     const state = deepClone(previous);
     state.terrain = state.baseTerrain.slice();
     state.ceiling = state.baseCeiling ? state.baseCeiling.slice() : null;
-    state.tanks = {
-      blue: { x: round(state.spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: STANDARD_POWER },
-      red: { x: round(state.spawnPositions.red, 3), hits: 0, alive: true, angle: -45, power: STANDARD_POWER }
-    };
-    state.credits = { blue: 0, red: 0 };
-    state.inventory = { blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }, red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 } };
-    state.upgrades = { blue: { engine: false }, red: { engine: false } };
+    state.tanks = {};
+    state.credits = {};
+    state.inventory = {};
+    state.upgrades = {};
+    for (const team of stateTeams(state)) {
+      const x = round(state.spawnPositions[team], 3);
+      state.tanks[team] = { x, hits: 0, alive: true, angle: x < state.settings.worldWidth / 2 ? 45 : -45, power: STANDARD_POWER };
+      state.credits[team] = 0;
+      state.inventory[team] = { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 };
+      state.upgrades[team] = { engine: false };
+    }
     state.round = roundNumber;
-    state.turn = roundNumber % 2 === 0 ? "red" : "blue";
+    state.turn = state.activeTeams[(roundNumber - 1) % state.activeTeams.length];
     state.turnsRemaining = 1;
     state.bonusFromDouble = false;
     state.movedThisTurn = false;
@@ -2946,7 +3234,11 @@
     incomingTransfers.clear();
     lastInitialGameSendAt = 0;
     try { if (connection) connection.close(); } catch {}
-    try { if (pendingConnection) pendingConnection.close(); } catch {}
+    try { if (pendingConnection?.conn) pendingConnection.conn.close(); } catch {}
+    for (const record of hostConnections.values()) { try { record.conn?.close(); } catch {} }
+    for (const record of pendingJoinQueue) { try { record.conn?.close(); } catch {} }
+    hostConnections.clear();
+    pendingJoinQueue.length = 0;
     try { if (peer && !peer.destroyed) peer.destroy(); } catch {}
     peer = null;
     connection = null;
@@ -2959,6 +3251,9 @@
     botTimer = null;
     safelyDestroyPeer();
     role = null;
+    localTeamId = "blue";
+    lobbyRoster = {};
+    battleStarted = false;
     accepted = false;
     acceptRequested = false;
     clearGuestReadyHandshake();
@@ -2981,6 +3276,8 @@
     dom.eventLog.replaceChildren();
     dom.roomCodeWrap.classList.add("hidden");
     dom.incomingRequest.classList.add("hidden");
+    dom.startBattleButton?.classList.add("hidden");
+    dom.lobbyRoster?.replaceChildren();
     dom.joinCode.value = "";
     dom.hostButton.disabled = false;
     dom.botButton.disabled = false;
@@ -3344,7 +3641,7 @@
   }
 
   function playTurnSound(team) {
-    const base = team === "blue" ? 520 : 390;
+    const base = ({ blue: 520, red: 390, green: 455, yellow: 610 })[team] || 470;
     tone(base, .08, "triangle", .025);
     tone(base * 1.25, .11, "triangle", .022, .075);
   }
@@ -3546,8 +3843,7 @@
     ctx.clearRect(0, 0, dom.canvas.width, dom.canvas.height);
     ctx.drawImage(staticCanvas, 0, 0);
     drawAimGuide();
-    drawTank("blue", now);
-    drawTank("red", now);
+    for (const team of stateTeams()) drawTank(team, now);
     drawInspectionReticle(now);
     drawProjectileAnimation(now);
     drawVignette();
@@ -3938,7 +4234,7 @@
     const radius = Math.max(6.5, 9.2 * (gameState.settings.tankSize / 100));
     const random = mulberry32(gameState.seed ^ 0xc2b2ae35);
     ctx.save();
-    for (const team of ["blue", "red"]) {
+    for (const team of stateTeams()) {
       const centerX = gameState.spawnPositions[team];
       const ground = terrainAt(centerX);
       const originalGround = terrainAt(centerX, { ...gameState, terrain: gameState.baseTerrain });
@@ -4013,9 +4309,10 @@
     const bodyHeight = Math.max(0.28, tankWorldHeight() * metrics.sy);
     const slope = terrainSlopeAt(displayX);
     const bodyAngle = clamp(-Math.atan(slope * metrics.sy / metrics.sx), -1.08, 1.08);
-    const accent = team === "blue" ? "#176fa8" : "#a72d31";
-    const accentLight = team === "blue" ? "#55a9d8" : "#e05a5d";
-    const accentDark = team === "blue" ? "#123b55" : "#561b1d";
+    const teamColour = TEAM_COLOURS[team] || TEAM_COLOURS.blue;
+    const accent = teamColour.accent;
+    const accentLight = teamColour.light;
+    const accentDark = teamColour.dark;
     const steel = "#434840";
     const steelLight = "#666b61";
     const steelDark = "#1e221f";
@@ -4168,7 +4465,7 @@
         ctx.arc(bodyWidth * x, bodyHeight * .015, Math.max(.55, bodyHeight * .022), 0, Math.PI * 2);
         ctx.fill();
       }
-      const random = mulberry32(gameState.seed ^ (team === "blue" ? 0x22334455 : 0x88442211));
+      const random = mulberry32(gameState.seed ^ (0x22334455 + TEAM_ORDER.indexOf(team) * 0x13579b));
       ctx.strokeStyle = "rgba(218,209,183,.25)";
       ctx.lineWidth = Math.max(.35, bodyHeight * .02);
       for (let i = 0; i < 13; i += 1) {
@@ -4226,7 +4523,7 @@
       ctx.moveTo(-turretW * .33, -turretH * .50);
       ctx.lineTo(-turretW * .43, -turretH * 1.65);
       ctx.stroke();
-      ctx.fillStyle = team === "blue" ? "#617f8f" : "#8b5650";
+      ctx.fillStyle = (TEAM_COLOURS[team] || TEAM_COLOURS.blue).muted;
       ctx.beginPath();
       ctx.arc(-turretW * .43, -turretH * 1.65, Math.max(.65, bodyHeight * .035), 0, Math.PI * 2);
       ctx.fill();
@@ -4235,6 +4532,30 @@
 
     if (tank.hits > 0 && tank.alive) drawTankSmoke(turretPoint.x, turretPoint.y, tank.hits, now);
     if (!tank.alive) drawDestroyedTank(turretPoint.x, turretPoint.y, bodyWidth, bodyHeight, now);
+    drawTankNameplate(team, turretPoint.x, turretPoint.y, bodyWidth, bodyHeight);
+  }
+
+  function drawTankNameplate(team, x, y, bodyWidth, bodyHeight) {
+    const label = tankLabel(team);
+    const fontSize = clamp(Math.max(9, bodyWidth * .16), 9, 13);
+    ctx.save();
+    ctx.font = `800 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const textWidth = ctx.measureText(label).width;
+    const width = Math.min(Math.max(42, textWidth + 12), 150);
+    const labelY = y - Math.max(16, bodyHeight * 1.8);
+    ctx.fillStyle = "rgba(7,11,15,.72)";
+    roundedRect(ctx, x - width / 2, labelY - 9, width, 18, 4);
+    ctx.fill();
+    ctx.strokeStyle = (TEAM_COLOURS[team] || TEAM_COLOURS.blue).light;
+    ctx.globalAlpha = .88;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#f2f4ef";
+    const shown = label.length > 18 ? `${label.slice(0, 17)}…` : label;
+    ctx.fillText(shown, x, labelY + .5);
+    ctx.restore();
   }
 
   function roundedRect(context, x, y, width, height, radius) {
@@ -4361,7 +4682,7 @@
     let vy = Math.sin(radians) * power * .60;
     const dt = .12;
     ctx.save();
-    ctx.fillStyle = team === "blue" ? "rgba(172,220,255,.65)" : "rgba(255,190,194,.65)";
+    ctx.fillStyle = `${(TEAM_COLOURS[team] || TEAM_COLOURS.blue).light}aa`;
     for (let i = 0; i < 18; i += 1) {
       vx += gameState.wind * .2 * dt;
       vy -= gameState.settings.gravity * dt;
@@ -4390,7 +4711,7 @@
     ctx.fillStyle = "rgba(8,13,22,.84)";
     roundedRect(ctx, center.x - width / 2, center.y - 15, width, 30, 5);
     ctx.fill();
-    ctx.strokeStyle = packet.shooter === "blue" ? "rgba(79,164,255,.85)" : "rgba(255,92,99,.85)";
+    ctx.strokeStyle = (TEAM_COLOURS[packet.shooter] || TEAM_COLOURS.blue).light;
     ctx.lineWidth = 1.4;
     ctx.stroke();
     ctx.fillStyle = "#f3f6fb";
@@ -4535,7 +4856,7 @@
     const scale = packet.weapon === "bigBertha" ? 2.35 : packet.doubleStrike ? 2 : 1;
     const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 18 * scale);
     glow.addColorStop(0, "rgba(255,255,255,1)");
-    glow.addColorStop(.24, team === "blue" ? "rgba(79,164,255,.95)" : "rgba(255,92,99,.95)");
+    glow.addColorStop(.24, TEAM_COLOURS[team]?.accent || "rgba(230,230,230,.95)");
     glow.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = glow;
     ctx.beginPath();
@@ -4549,7 +4870,7 @@
     if (parachuteOpen) {
       ctx.save();
       ctx.strokeStyle = "rgba(230,220,190,.92)";
-      ctx.fillStyle = team === "blue" ? "rgba(45,88,130,.95)" : "rgba(132,48,50,.95)";
+      ctx.fillStyle = TEAM_COLOURS[team]?.dark || "rgba(90,90,90,.95)";
       ctx.lineWidth = 1.4;
       ctx.beginPath();
       ctx.moveTo(p.x - 3, p.y - 3);
@@ -4631,6 +4952,7 @@
       button.setAttribute("aria-expanded", String(!collapsed));
     }
     if (panel.dataset.panel === "armoury") dom.armouryToolButton?.classList.toggle("active", !collapsed);
+    if (panel.dataset.panel === "chat") dom.chatToolButton?.classList.toggle("active", !collapsed);
     if (panel.dataset.panel === "battlefield") dom.worldToolButton?.classList.toggle("active", !collapsed);
   }
 
@@ -4659,6 +4981,17 @@
         if ((short || narrow) && panel.dataset.panel === "chat") setPanelCollapsed(panel, true);
       }
     });
+  }
+
+  function toggleChatPanel() {
+    if (!dom.chatPanel) return;
+    if (currentScreen === "home" && hasLiveSession()) placePersistentChat("home");
+    const opening = dom.chatPanel.classList.contains("collapsed") || (window.innerWidth <= 720 && !dom.chatPanel.classList.contains("mobile-open"));
+    if (window.innerWidth <= 720) dom.chatPanel.classList.toggle("mobile-open", opening);
+    setPanelCollapsed(dom.chatPanel, !opening);
+    dom.chatToolButton?.classList.toggle("active", opening);
+    if (opening) setTimeout(() => dom.chatInput?.focus(), 80);
+    markCanvasResize();
   }
 
   function toggleArmouryPanel() {
@@ -4748,6 +5081,7 @@
   dom.joinButton.addEventListener("click", startGuest);
   dom.copyCodeButton.addEventListener("click", copyRoomCode);
   dom.acceptButton.addEventListener("click", acceptGuest);
+  dom.startBattleButton.addEventListener("click", startHostedBattle);
   dom.declineButton.addEventListener("click", declineGuest);
   dom.leaveLobbyButton.addEventListener("click", resetAll);
   dom.moveLeftButton.addEventListener("click", () => requestMove(-1));
@@ -4768,6 +5102,7 @@
   dom.repairKitButton.addEventListener("click", () => requestArmouryItem("repair"));
   dom.chatForm.addEventListener("submit", submitChat);
   dom.soundButton.addEventListener("click", toggleSound);
+  dom.chatToolButton.addEventListener("click", toggleChatPanel);
   dom.armouryToolButton.addEventListener("click", toggleArmouryPanel);
   dom.worldToolButton.addEventListener("click", toggleBattlefieldPanel);
   dom.locatorButton.addEventListener("click", toggleInspectionMode);
@@ -4811,6 +5146,7 @@
       const panel = button.closest(".collapsible-panel");
       togglePanel(panel);
       if (panel?.dataset.panel === "armoury") dom.armouryToolButton.classList.toggle("active", !panel.classList.contains("collapsed"));
+      if (panel?.dataset.panel === "chat") dom.chatToolButton?.classList.toggle("active", !panel.classList.contains("collapsed"));
       if (panel?.dataset.panel === "battlefield") dom.worldToolButton.classList.toggle("active", !panel.classList.contains("collapsed"));
     });
   });
@@ -4852,6 +5188,17 @@
     if (role === "bot" && gameState?.turn === "red" && !gameState.winner && !animation) scheduleBotTurn();
   });
   window.addEventListener("beforeunload", safelyDestroyPeer);
+
+  try {
+    const savedProfile = JSON.parse(localStorage.getItem("red-vs-blue-profile") || "null");
+    if (savedProfile) {
+      dom.playerNameInput.value = cleanProfileText(savedProfile.playerName, "");
+      dom.tankNameInput.value = cleanProfileText(savedProfile.tankName, "");
+    }
+  } catch {}
+  [dom.playerNameInput, dom.tankNameInput].forEach(input => input?.addEventListener("change", () => {
+    try { localStorage.setItem("red-vs-blue-profile", JSON.stringify(readLocalProfile())); } catch {}
+  }));
 
   updateSettingOutputs();
   setScreen("home");

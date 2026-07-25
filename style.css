@@ -1532,3 +1532,162 @@ body.game-active .round-panel:not(.collapsed) .panel-body {
   .status-tank-canvas { width: min(100%, 112px); }
   .recent-actions { font-size: .39rem; }
 }
+
+/* v16 — named players, persistent chat control and 2–4 player rooms */
+.identity-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin: 7px 0 14px;
+}
+.identity-grid .field { min-width: 0; }
+.identity-grid input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: rgba(6, 11, 18, .66);
+}
+.play-eyebrow { margin-top: 2px; }
+
+.lobby-roster-wrap {
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(8, 14, 23, .55);
+}
+.lobby-roster-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.lobby-roster-heading h3 { margin: 0; }
+.lobby-roster-heading span { color: var(--muted); font-size: .72rem; font-weight: 900; letter-spacing: .08em; }
+.lobby-roster { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.lobby-player {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-left: 3px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+}
+.lobby-player.blue { border-left-color: #3e9fe2; }
+.lobby-player.red { border-left-color: #dc464b; }
+.lobby-player.green { border-left-color: #55ad70; }
+.lobby-player.yellow { border-left-color: #d6ad3f; }
+.lobby-player div { min-width: 0; }
+.lobby-player strong, .lobby-player small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lobby-player small { margin-top: 2px; color: var(--muted); font-size: .68rem; }
+.lobby-player-status { color: var(--muted); font-size: .58rem; font-weight: 900; letter-spacing: .08em; }
+.start-battle-button { width: 100%; margin-top: 10px; justify-content: center; }
+
+.battle-hud {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+.battle-hud .turn-card {
+  min-height: 38px;
+  padding: 5px 10px;
+  display: grid;
+  grid-template-columns: minmax(130px, auto) auto minmax(0, 1fr);
+  align-items: center;
+  justify-items: start;
+  gap: 12px;
+  text-align: left;
+}
+.battle-hud .turn-card strong { margin: 0; }
+.player-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.player-card-grid .tank-card {
+  min-width: 0;
+  min-height: 0;
+  padding: 6px 8px 7px;
+  border-radius: 8px;
+}
+.player-card-grid .tank-card-title { min-width: 0; gap: 6px; }
+.tank-identity { min-width: 0; flex: 1 1 auto; }
+.tank-identity strong,
+.tank-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tank-identity strong { font-size: .7rem; letter-spacing: .03em; }
+.tank-identity small { margin-top: 1px; color: var(--muted); font-size: .5rem; font-weight: 700; letter-spacing: .04em; }
+.player-card-grid .tank-card-title > span:not(.team-swatch) { flex: 0 0 auto; font-size: .48rem; }
+.player-card-grid .tank-card-visual-row { grid-template-columns: minmax(58px, 1fr) minmax(50px, .7fr); gap: 5px; margin-top: 2px; }
+.player-card-grid .status-tank-canvas { width: 100%; max-width: 105px; height: 34px; object-fit: contain; }
+.player-card-grid .integrity-readout { min-width: 0; }
+.player-card-grid .integrity-readout span { font-size: .43rem; }
+.player-card-grid .integrity-readout strong { font-size: .65rem; }
+.player-card-grid .integrity-readout i { height: 4px; }
+.player-card-grid .team-loadout { min-height: 14px; margin-top: 2px; gap: 2px; white-space: nowrap; overflow: hidden; }
+.player-card-grid .loadout-chip,
+.player-card-grid .loadout-empty { font-size: .42rem; padding: 2px 3px; }
+.player-card-grid .recent-actions { min-height: 22px; margin-top: 2px; }
+.player-card-grid .recent-actions span { font-size: .46rem; line-height: 1.15; }
+.player-card-grid .tank-card-status { margin-top: 3px; }
+.player-card-grid .credit-readout { font-size: .54rem; }
+.player-card-grid .hit-pip { width: 10px; height: 4px; }
+.team-swatch.green { background: #55ad70; }
+.team-swatch.yellow { background: #d6ad3f; }
+.green-card { border-color: rgba(85,173,112,.30); }
+.yellow-card { border-color: rgba(214,173,63,.30); }
+.tank-card.active-turn { border-color: #65d88c !important; box-shadow: inset 0 0 0 1px rgba(101,216,140,.45), 0 0 0 1px rgba(101,216,140,.14); }
+.tank-card.destroyed { opacity: .76; }
+.scoreboard-strip {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+}
+.scoreboard-strip .score-team,
+.scoreboard-strip .score-round { font-size: .56rem; font-style: normal; font-weight: 800; white-space: nowrap; }
+.scoreboard-strip .score-team.blue { color: #8fc7ff; }
+.scoreboard-strip .score-team.red { color: #ff9da2; }
+.scoreboard-strip .score-team.green { color: #8ed9a2; }
+.scoreboard-strip .score-team.yellow { color: #f0d17b; }
+.scoreboard-strip b { color: #fff; font-size: .72rem; }
+
+.chat-tool { right: 230px; font-size: 1rem; }
+.chat-tool.active { color: #fff; border-color: #72b7e7; background: rgba(42, 103, 145, .82); }
+.team-supply-badge.green-supply { color: #b5f0c3; border-color: #4d9464; background: rgba(31,85,50,.58); }
+.team-supply-badge.yellow-supply { color: #ffebad; border-color: #997c2d; background: rgba(92,71,17,.58); }
+
+@media (max-width: 1180px) {
+  .player-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .battle-hud .turn-card { grid-template-columns: auto auto 1fr; }
+}
+@media (max-width: 720px) {
+  .identity-grid, .lobby-roster { grid-template-columns: 1fr; }
+  body.game-active .battle-hud { grid-template-columns: 1fr; }
+  body.game-active .player-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; }
+  body.game-active .battle-hud .turn-card { min-height: 31px; padding: 3px 5px; grid-template-columns: auto auto 1fr; gap: 5px; }
+  body.game-active .player-card-grid .tank-card { min-height: 0; padding: 3px 4px 4px; }
+  body.game-active .player-card-grid .tank-card-visual-row { display: none; }
+  body.game-active .player-card-grid .team-loadout { display: none; }
+  body.game-active .player-card-grid .recent-actions { min-height: 12px; }
+  body.game-active .player-card-grid .recent-actions span.previous { display: none; }
+  .chat-tool { right: 230px; }
+}
+@media (max-width: 520px) {
+  .chat-tool { right: 186px; top: 52px; }
+  .armoury-tool { right: 142px; top: 52px; }
+  .world-tool { right: 98px; top: 52px; }
+}

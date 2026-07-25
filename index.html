@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v15 v14</title>
-  <link rel="stylesheet" href="style.css?v=14">
+  <meta name="description" content="A two-to-four player peer-to-peer turn-based artillery game for modern browsers.">
+  <title>Red vs Blue — P2P Tanks v16</title>
+  <link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
   <div id="app" class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
         <span class="brand-kicker">PEER-TO-PEER ARTILLERY</span>
-        <img class="brand-logo" src="red-vs-blue-logo.png?v=13" alt="Red vs Blue tank battle">
+        <img class="brand-logo" src="red-vs-blue-logo.png?v=16" alt="Red vs Blue tank battle">
       </div>
       <div id="connectionPill" class="connection-pill offline">
         <span class="connection-dot"></span>
@@ -113,10 +113,15 @@
           </section>
 
           <section class="panel action-panel">
-            <p class="eyebrow">PLAY</p>
+            <p class="eyebrow">IDENTITY</p>
+            <div class="identity-grid">
+              <label class="field"><span>Your name</span><input id="playerNameInput" type="text" maxlength="18" autocomplete="nickname" placeholder="Player"></label>
+              <label class="field"><span>Tank name</span><input id="tankNameInput" type="text" maxlength="18" autocomplete="off" placeholder="Tank"></label>
+            </div>
+            <p class="eyebrow play-eyebrow">PLAY</p>
             <button id="hostButton" class="primary-button blue-button">
               <span class="button-icon">⌁</span>
-              <span><strong>Host online game</strong><small>Create a code for another player</small></span>
+              <span><strong>Host online game</strong><small>Create a room for up to four players</small></span>
             </button>
             <button id="botButton" class="primary-button neutral-button">
               <span class="button-icon">◆</span>
@@ -152,13 +157,19 @@
           <div id="incomingRequest" class="incoming-request hidden">
             <div class="incoming-avatar">?</div>
             <div>
-              <strong>A player wants to join</strong>
-              <span>The host controls the rules and official game state.</span>
+              <strong id="incomingRequestTitle">A player wants to join</strong>
+              <span id="incomingRequestMeta">The host controls the rules and official game state.</span>
             </div>
             <div class="incoming-actions">
               <button id="declineButton" class="secondary-button danger-button">Decline</button>
               <button id="acceptButton" class="secondary-button accept-button">Accept</button>
             </div>
+          </div>
+
+          <div class="lobby-roster-wrap">
+            <div class="lobby-roster-heading"><h3>Players</h3><span id="lobbyPlayerCount">1 / 4</span></div>
+            <div id="lobbyRoster" class="lobby-roster" aria-live="polite"></div>
+            <button id="startBattleButton" class="primary-button start-battle-button hidden" type="button"><span class="button-icon">▶</span><span><strong>Start battle</strong><small>Begin with the players currently connected</small></span></button>
           </div>
 
           <div class="lobby-rules">
@@ -175,36 +186,54 @@
         <div class="game-layout">
           <section class="battle-column">
             <div class="battle-hud">
-              <div id="blueTankCard" class="tank-card blue-card">
-                <div class="tank-card-title"><span class="team-swatch blue"></span><strong>BLUE</strong><span id="blueRoleLabel">HOST</span></div>
-                <div class="tank-card-visual-row">
-                  <canvas id="blueStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Blue tank orientation and condition"></canvas>
-                  <div class="integrity-readout"><span>INTEGRITY</span><strong id="blueIntegrityLabel">100%</strong><i><b id="blueIntegrityFill"></b></i></div>
-                </div>
-                <div id="blueLoadout" class="team-loadout" aria-label="Blue purchases"><span class="loadout-empty">NO PURCHASES</span></div>
-                <div id="blueRecentActions" class="recent-actions" aria-label="Blue's two most recent actions"><span>Awaiting action</span></div>
-                <div class="tank-card-status"><div id="blueHits" class="hit-pips" aria-label="Blue tank damage"></div><span id="blueCredits" class="credit-readout">0 CR</span></div>
-              </div>
-
               <div class="turn-card">
                 <span id="turnLabel">BLUE TURN</span>
                 <strong id="windLabel">WIND 0.0 →</strong>
-                <div class="scoreboard-strip" aria-label="Running match score">
-                  <span>BLUE <b id="blueScore">0</b></span>
-                  <em>ROUND <b id="roundNumber">1</b></em>
-                  <span><b id="redScore">0</b> RED</span>
+                <div id="scoreboardStrip" class="scoreboard-strip" aria-label="Running match score">
+                  <span class="score-round">ROUND <b id="roundNumber">1</b></span>
                 </div>
               </div>
-
-              <div id="redTankCard" class="tank-card red-card">
-                <div class="tank-card-title"><span id="redRoleLabel">GUEST</span><strong>RED</strong><span class="team-swatch red"></span></div>
-                <div class="tank-card-visual-row red-visual-row">
-                  <div class="integrity-readout"><span>INTEGRITY</span><strong id="redIntegrityLabel">100%</strong><i><b id="redIntegrityFill"></b></i></div>
-                  <canvas id="redStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Red tank orientation and condition"></canvas>
+              <div id="playerCardGrid" class="player-card-grid">
+                <div id="blueTankCard" class="tank-card blue-card" data-team="blue">
+                  <div class="tank-card-title"><span class="team-swatch blue"></span><div class="tank-identity"><strong id="bluePlayerName">BLUE</strong><small id="blueTankName">BLUE TANK</small></div><span id="blueRoleLabel">HOST</span></div>
+                  <div class="tank-card-visual-row">
+                    <canvas id="blueStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Blue tank orientation and condition"></canvas>
+                    <div class="integrity-readout"><span>INTEGRITY</span><strong id="blueIntegrityLabel">100%</strong><i><b id="blueIntegrityFill"></b></i></div>
+                  </div>
+                  <div id="blueLoadout" class="team-loadout" aria-label="Blue purchases"><span class="loadout-empty">NO PURCHASES</span></div>
+                  <div id="blueRecentActions" class="recent-actions" aria-label="Blue's two most recent actions"><span>Awaiting action</span></div>
+                  <div class="tank-card-status"><div id="blueHits" class="hit-pips" aria-label="Blue tank damage"></div><span id="blueCredits" class="credit-readout">0 CR</span></div>
                 </div>
-                <div id="redLoadout" class="team-loadout" aria-label="Red purchases"><span class="loadout-empty">NO PURCHASES</span></div>
-                <div id="redRecentActions" class="recent-actions" aria-label="Red's two most recent actions"><span>Awaiting action</span></div>
-                <div class="tank-card-status"><div id="redHits" class="hit-pips" aria-label="Red tank damage"></div><span id="redCredits" class="credit-readout">0 CR</span></div>
+                <div id="redTankCard" class="tank-card red-card" data-team="red">
+                  <div class="tank-card-title"><span class="team-swatch red"></span><div class="tank-identity"><strong id="redPlayerName">RED</strong><small id="redTankName">RED TANK</small></div><span id="redRoleLabel">GUEST 1</span></div>
+                  <div class="tank-card-visual-row">
+                    <canvas id="redStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Red tank orientation and condition"></canvas>
+                    <div class="integrity-readout"><span>INTEGRITY</span><strong id="redIntegrityLabel">100%</strong><i><b id="redIntegrityFill"></b></i></div>
+                  </div>
+                  <div id="redLoadout" class="team-loadout" aria-label="Red purchases"><span class="loadout-empty">NO PURCHASES</span></div>
+                  <div id="redRecentActions" class="recent-actions" aria-label="Red's two most recent actions"><span>Awaiting action</span></div>
+                  <div class="tank-card-status"><div id="redHits" class="hit-pips" aria-label="Red tank damage"></div><span id="redCredits" class="credit-readout">0 CR</span></div>
+                </div>
+                <div id="greenTankCard" class="tank-card green-card hidden" data-team="green">
+                  <div class="tank-card-title"><span class="team-swatch green"></span><div class="tank-identity"><strong id="greenPlayerName">GREEN</strong><small id="greenTankName">GREEN TANK</small></div><span id="greenRoleLabel">GUEST 2</span></div>
+                  <div class="tank-card-visual-row">
+                    <canvas id="greenStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Green tank orientation and condition"></canvas>
+                    <div class="integrity-readout"><span>INTEGRITY</span><strong id="greenIntegrityLabel">100%</strong><i><b id="greenIntegrityFill"></b></i></div>
+                  </div>
+                  <div id="greenLoadout" class="team-loadout" aria-label="Green purchases"><span class="loadout-empty">NO PURCHASES</span></div>
+                  <div id="greenRecentActions" class="recent-actions" aria-label="Green's two most recent actions"><span>Awaiting action</span></div>
+                  <div class="tank-card-status"><div id="greenHits" class="hit-pips" aria-label="Green tank damage"></div><span id="greenCredits" class="credit-readout">0 CR</span></div>
+                </div>
+                <div id="yellowTankCard" class="tank-card yellow-card hidden" data-team="yellow">
+                  <div class="tank-card-title"><span class="team-swatch yellow"></span><div class="tank-identity"><strong id="yellowPlayerName">YELLOW</strong><small id="yellowTankName">YELLOW TANK</small></div><span id="yellowRoleLabel">GUEST 3</span></div>
+                  <div class="tank-card-visual-row">
+                    <canvas id="yellowStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Yellow tank orientation and condition"></canvas>
+                    <div class="integrity-readout"><span>INTEGRITY</span><strong id="yellowIntegrityLabel">100%</strong><i><b id="yellowIntegrityFill"></b></i></div>
+                  </div>
+                  <div id="yellowLoadout" class="team-loadout" aria-label="Yellow purchases"><span class="loadout-empty">NO PURCHASES</span></div>
+                  <div id="yellowRecentActions" class="recent-actions" aria-label="Yellow's two most recent actions"><span>Awaiting action</span></div>
+                  <div class="tank-card-status"><div id="yellowHits" class="hit-pips" aria-label="Yellow tank damage"></div><span id="yellowCredits" class="credit-readout">0 CR</span></div>
+                </div>
               </div>
             </div>
 
@@ -225,6 +254,7 @@
                 </div>
               </div>
               <div id="canvasViewLabel" class="canvas-view-label">WHOLE BATTLEFIELD</div>
+              <button id="chatToolButton" class="canvas-tool chat-tool" title="Open battle chat" aria-label="Open battle chat">✉</button>
               <button id="armouryToolButton" class="canvas-tool armoury-tool" title="Open armoury" aria-label="Open armoury">▦</button>
               <button id="worldToolButton" class="canvas-tool world-tool" title="World and battlefield controls" aria-label="World and battlefield controls">◉</button>
               <button id="soundButton" class="canvas-tool sound-tool active" title="Toggle sound" aria-label="Toggle sound">♪</button>
@@ -386,6 +416,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
