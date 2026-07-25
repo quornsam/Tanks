@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v14</title>
+  <title>Red vs Blue — P2P Tanks v15 v14</title>
   <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
@@ -47,6 +47,7 @@
           </div>
           <div class="connected-menu-actions">
             <button id="resumeBattleButton" class="secondary-button accept-button">Resume battle</button>
+            <button id="connectedApplySettingsButton" class="secondary-button settings-button">Apply settings</button>
             <button id="disconnectSessionButton" class="secondary-button danger-button">Disconnect</button>
           </div>
         </section>
@@ -177,10 +178,11 @@
               <div id="blueTankCard" class="tank-card blue-card">
                 <div class="tank-card-title"><span class="team-swatch blue"></span><strong>BLUE</strong><span id="blueRoleLabel">HOST</span></div>
                 <div class="tank-card-visual-row">
-                  <canvas id="blueStatusTankCanvas" class="status-tank-canvas" width="180" height="52" aria-label="Blue tank orientation and condition"></canvas>
+                  <canvas id="blueStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Blue tank orientation and condition"></canvas>
                   <div class="integrity-readout"><span>INTEGRITY</span><strong id="blueIntegrityLabel">100%</strong><i><b id="blueIntegrityFill"></b></i></div>
                 </div>
                 <div id="blueLoadout" class="team-loadout" aria-label="Blue purchases"><span class="loadout-empty">NO PURCHASES</span></div>
+                <div id="blueRecentActions" class="recent-actions" aria-label="Blue's two most recent actions"><span>Awaiting action</span></div>
                 <div class="tank-card-status"><div id="blueHits" class="hit-pips" aria-label="Blue tank damage"></div><span id="blueCredits" class="credit-readout">0 CR</span></div>
               </div>
 
@@ -198,9 +200,10 @@
                 <div class="tank-card-title"><span id="redRoleLabel">GUEST</span><strong>RED</strong><span class="team-swatch red"></span></div>
                 <div class="tank-card-visual-row red-visual-row">
                   <div class="integrity-readout"><span>INTEGRITY</span><strong id="redIntegrityLabel">100%</strong><i><b id="redIntegrityFill"></b></i></div>
-                  <canvas id="redStatusTankCanvas" class="status-tank-canvas" width="180" height="52" aria-label="Red tank orientation and condition"></canvas>
+                  <canvas id="redStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Red tank orientation and condition"></canvas>
                 </div>
                 <div id="redLoadout" class="team-loadout" aria-label="Red purchases"><span class="loadout-empty">NO PURCHASES</span></div>
+                <div id="redRecentActions" class="recent-actions" aria-label="Red's two most recent actions"><span>Awaiting action</span></div>
                 <div class="tank-card-status"><div id="redHits" class="hit-pips" aria-label="Red tank damage"></div><span id="redCredits" class="credit-readout">0 CR</span></div>
               </div>
             </div>
@@ -339,19 +342,21 @@
                 <div class="panel-heading-actions"><span id="roundControlBadge" class="mini-badge">HOST</span><button class="collapse-button" type="button" aria-label="Collapse battlefield controls" title="Collapse panel">−</button></div>
               </div>
               <div class="panel-body">
-              <div class="game-world-control">
-                <label for="gameLocationSelect">World</label>
-                <div>
-                  <select id="gameLocationSelect">
-                    <option value="earth">Earth</option>
-                    <option value="mars">Mars</option>
-                    <option value="moon">Moon</option>
-                    <option value="space">Space asteroid</option>
-                    <option value="cave">Cave</option>
-                  </select>
-                  <button id="changeWorldButton" class="round-action-button" type="button">Change</button>
-                </div>
+              <div class="match-settings-grid">
+                <label><span>World</span><select id="gameLocationSelect">
+                  <option value="earth">Earth</option><option value="mars">Mars</option><option value="moon">Moon</option><option value="space">Space asteroid</option><option value="cave">Cave</option>
+                </select></label>
+                <label><span>Gravity</span><input id="gameGravityInput" type="number" min="0.4" max="16" step="0.01"></label>
+                <label><span>Tank size</span><input id="gameTankSizeInput" type="number" min="5" max="100" step="5"></label>
+                <label><span>Map size</span><select id="gameWorldSizeSelect">
+                  <option value="compact">Compact</option><option value="standard">Standard</option><option value="wide">Wide</option><option value="massive">Massive</option><option value="epic">Epic</option>
+                </select></label>
+                <label><span>Wind</span><select id="gameWindSelect">
+                  <option value="0">None</option><option value="1">Low</option><option value="2">Medium</option><option value="3">High</option><option value="4">Wild</option>
+                </select></label>
+                <label><span>Hits</span><input id="gameHitsInput" type="number" min="1" max="8" step="1"></label>
               </div>
+              <button id="applyGameSettingsButton" class="round-action-button apply-settings-button" type="button"><strong>Apply settings</strong><span>Starts a fresh round after approval</span></button>
               <div class="round-action-grid">
                 <button id="restartRoundButton" class="round-action-button">
                   <strong>Restart</strong><span>Same map</span>
@@ -360,7 +365,8 @@
                   <strong>Regenerate</strong><span>New terrain</span>
                 </button>
               </div>
-              <p id="roundControlNote" class="round-control-note">The host controls battlefield resets.</p>
+              <button id="changeWorldButton" class="hidden" type="button" tabindex="-1" aria-hidden="true">Change world</button>
+              <p id="roundControlNote" class="round-control-note">Changes require both players to agree.</p>
               </div>
             </section>
 
@@ -380,6 +386,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

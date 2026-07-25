@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 14;
+  const APP_VERSION = 15;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -56,6 +56,7 @@
     connectedMenuTitle: $("connectedMenuTitle"),
     connectedMenuText: $("connectedMenuText"),
     resumeBattleButton: $("resumeBattleButton"),
+    connectedApplySettingsButton: $("connectedApplySettingsButton"),
     disconnectSessionButton: $("disconnectSessionButton"),
     menuChatDock: $("menuChatDock"),
     lobbyTitle: $("lobbyTitle"),
@@ -75,6 +76,8 @@
     redRoleLabel: $("redRoleLabel"),
     blueLoadout: $("blueLoadout"),
     redLoadout: $("redLoadout"),
+    blueRecentActions: $("blueRecentActions"),
+    redRecentActions: $("redRecentActions"),
     blueHits: $("blueHits"),
     redHits: $("redHits"),
     blueCredits: $("blueCredits"),
@@ -151,6 +154,12 @@
     restartRoundButton: $("restartRoundButton"),
     regenerateMapButton: $("regenerateMapButton"),
     gameLocationSelect: $("gameLocationSelect"),
+    gameGravityInput: $("gameGravityInput"),
+    gameTankSizeInput: $("gameTankSizeInput"),
+    gameWorldSizeSelect: $("gameWorldSizeSelect"),
+    gameWindSelect: $("gameWindSelect"),
+    gameHitsInput: $("gameHitsInput"),
+    applyGameSettingsButton: $("applyGameSettingsButton"),
     changeWorldButton: $("changeWorldButton"),
     roundControlBadge: $("roundControlBadge"),
     roundControlNote: $("roundControlNote"),
@@ -199,6 +208,7 @@
   let pendingArmAfterPurchase = null;
   let teleportMode = false;
   let currentScreen = "home";
+  const recentPlayerActions = { blue: [], red: [] };
   const aimDrag = { active: false, pointerId: null };
   const inspectionCamera = {
     active: false,
@@ -436,8 +446,9 @@
     if (!live) return;
     const opponent = role === "bot" ? "computer opponent" : "other player";
     dom.connectedMenuTitle.textContent = role === "bot" ? "Bot match paused" : "Still connected";
-    dom.connectedMenuText.textContent = `Your ${opponent} and battle chat remain available.`;
+    dom.connectedMenuText.textContent = `Your ${opponent} and battle chat remain available. Edit the rules below, then apply them for a fresh round.`;
     dom.resumeBattleButton.disabled = !gameState;
+    dom.connectedApplySettingsButton.disabled = !gameState;
   }
 
   function returnToMenuPreservingSession() {
@@ -449,6 +460,7 @@
     movementAnimation = null;
     updateGameControls();
     hideCanvasMessage();
+    writeSettingsToHome(gameState.settings);
     setScreen("home");
     setConnectionStatus(role === "bot" ? "Bot match paused" : "Connected · in menu", "online");
     addEvent("Returned to the main menu; the session remains connected.");
@@ -475,6 +487,42 @@
     row.textContent = `${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}  ${message}`;
     dom.eventLog.appendChild(row);
     dom.eventLog.scrollTop = dom.eventLog.scrollHeight;
+    recordPlayerActionFromEvent(message);
+  }
+
+  function recordPlayerActionFromEvent(message) {
+    const match = /^(Blue|Red)\s+(.+?)(?:\.|$)/.exec(String(message || ""));
+    if (!match) return;
+    const team = match[1].toLowerCase();
+    let action = match[2]
+      .replace(/\s+\([^)]*\)$/g, "")
+      .replace(/\s+and now has three moves per turn$/i, "")
+      .replace(/\s+receives a double turn$/i, "")
+      .trim();
+    if (action.length > 42) action = `${action.slice(0, 39).trim()}…`;
+    if (!action || recentPlayerActions[team][0] === action) return;
+    recentPlayerActions[team].unshift(action);
+    recentPlayerActions[team] = recentPlayerActions[team].slice(0, 2);
+    renderRecentPlayerActions(team);
+  }
+
+  function renderRecentPlayerActions(team) {
+    const container = team === "blue" ? dom.blueRecentActions : dom.redRecentActions;
+    if (!container) return;
+    const actions = recentPlayerActions[team];
+    container.replaceChildren();
+    if (!actions.length) {
+      const empty = document.createElement("span");
+      empty.textContent = "Awaiting action";
+      container.appendChild(empty);
+      return;
+    }
+    actions.forEach((action, index) => {
+      const item = document.createElement("span");
+      item.textContent = action;
+      item.className = index === 0 ? "latest" : "previous";
+      container.appendChild(item);
+    });
   }
 
   function addChatMessage(sender, text, mine = false, bot = false) {
@@ -504,6 +552,59 @@
       windVariability: Number(dom.windInput.value),
       hitsToDestroy: Number(dom.hitsInput.value)
     };
+  }
+
+  function sanitiseSettings(settings = {}) {
+    const location = LOCATION_PRESETS[settings.location] ? settings.location : "earth";
+    const worldSize = WORLD_WIDTHS[settings.worldSize] ? settings.worldSize : "standard";
+    return {
+      location,
+      gravity: clamp(Number(settings.gravity) || LOCATION_PRESETS[location].gravity, 0.4, 16),
+      tankSize: clamp(Math.round((Number(settings.tankSize) || 50) / 5) * 5, 5, 100),
+      worldSize,
+      worldWidth: WORLD_WIDTHS[worldSize],
+      windVariability: clamp(Math.round(Number(settings.windVariability) || 0), 0, 4),
+      hitsToDestroy: clamp(Math.round(Number(settings.hitsToDestroy) || 3), 1, 8)
+    };
+  }
+
+  function writeSettingsToHome(settings) {
+    const safe = sanitiseSettings(settings);
+    dom.locationSelect.value = safe.location;
+    dom.gravityInput.value = safe.gravity;
+    dom.tankSizeInput.value = safe.tankSize;
+    dom.worldSizeSelect.value = safe.worldSize;
+    dom.windInput.value = safe.windVariability;
+    dom.hitsInput.value = safe.hitsToDestroy;
+    updateSettingOutputs();
+  }
+
+  function writeSettingsToMatchControls(settings) {
+    const safe = sanitiseSettings(settings);
+    dom.gameLocationSelect.value = safe.location;
+    dom.gameGravityInput.value = safe.gravity.toFixed(2);
+    dom.gameTankSizeInput.value = safe.tankSize;
+    dom.gameWorldSizeSelect.value = safe.worldSize;
+    dom.gameWindSelect.value = String(safe.windVariability);
+    dom.gameHitsInput.value = safe.hitsToDestroy;
+  }
+
+  function readMatchSettings() {
+    return sanitiseSettings({
+      location: dom.gameLocationSelect.value,
+      gravity: dom.gameGravityInput.value,
+      tankSize: dom.gameTankSizeInput.value,
+      worldSize: dom.gameWorldSizeSelect.value,
+      windVariability: dom.gameWindSelect.value,
+      hitsToDestroy: dom.gameHitsInput.value
+    });
+  }
+
+  function settingsDiffer(a, b) {
+    const left = sanitiseSettings(a);
+    const right = sanitiseSettings(b);
+    return ["location", "gravity", "tankSize", "worldSize", "windVariability", "hitsToDestroy"]
+      .some(key => String(left[key]) !== String(right[key]));
   }
 
   function applyLocationPreset() {
@@ -1000,6 +1101,7 @@
 
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
+    const openingTeam = roundNumber % 2 === 0 ? "red" : "blue";
     const state = {
       version: APP_VERSION,
       seed,
@@ -1021,7 +1123,7 @@
       upgrades: { blue: { engine: false }, red: { engine: false } },
       scores,
       round: roundNumber,
-      turn: "blue",
+      turn: openingTeam,
       turnsRemaining: 1,
       bonusFromDouble: false,
       movedThisTurn: false,
@@ -1275,6 +1377,8 @@
     if (!preserveLogs) {
       dom.chatLog.replaceChildren();
       dom.eventLog.replaceChildren();
+      recentPlayerActions.blue = [];
+      recentPlayerActions.red = [];
     }
     hideCanvasMessage();
     setScreen("game");
@@ -1287,7 +1391,10 @@
     dom.roundControlNote.textContent = role === "bot"
       ? "World changes and map resets happen immediately against the bot."
       : "World changes, restart and regenerate require both players to agree.";
-    dom.gameLocationSelect.value = gameState.settings.location;
+    writeSettingsToMatchControls(gameState.settings);
+    writeSettingsToHome(gameState.settings);
+    renderRecentPlayerActions("blue");
+    renderRecentPlayerActions("red");
     setConnectionStatus(role === "bot" ? "Computer opponent" : "Connected directly", "online");
     updateGameUI(true);
     ensureAudio();
@@ -1436,96 +1543,104 @@
     const angle = statusTankAngle(team, now);
     const directionAngle = worldAngleForTeam(team, angle) * Math.PI / 180;
     const recoil = animation?.packet?.shooter === team && animation.phase === "recoil"
-      ? Math.sin(Math.PI * clamp((now - animation.phaseStart) / animation.recoilDuration, 0, 1)) * 5
+      ? Math.sin(Math.PI * clamp((now - animation.phaseStart) / animation.recoilDuration, 0, 1)) * 4
       : 0;
-    const bodyX = team === "blue" ? 48 - Math.cos(directionAngle) * recoil : width - 48 - Math.cos(directionAngle) * recoil;
-    const bodyY = height - 14 + Math.sin(directionAngle) * recoil * .25;
-    const accent = team === "blue" ? "#4f9ed0" : "#c75452";
-    const darkAccent = team === "blue" ? "#254e65" : "#642a29";
+    const scale = Math.min(width / 190, height / 72);
+    const bodyX = team === "blue" ? 60 : 130;
+    const bodyY = 54;
+    const accent = team === "blue" ? "#538aa7" : "#a45d57";
+    const darkAccent = team === "blue" ? "#294b5d" : "#572f2b";
 
     context.clearRect(0, 0, width, height);
     context.save();
-    context.globalAlpha = tank.alive ? .98 : .72;
-    context.strokeStyle = "rgba(255,255,255,.08)";
-    context.lineWidth = 1;
+    context.scale(scale, scale);
+    context.globalAlpha = tank.alive ? 1 : .76;
+    context.strokeStyle = "rgba(255,255,255,.10)";
     context.beginPath();
-    context.moveTo(3, height - 5.5);
-    context.lineTo(width - 3, height - 5.5);
+    context.moveTo(5, 66);
+    context.lineTo(185, 66);
     context.stroke();
 
-    context.fillStyle = "#111514";
-    roundedRect(context, bodyX - 33, bodyY - 7, 66, 13, 4);
+    context.save();
+    context.translate(bodyX - Math.cos(directionAngle) * recoil, bodyY + Math.sin(directionAngle) * recoil * .2);
+
+    context.fillStyle = "#151918";
+    roundedRect(context, -43, -8, 86, 16, 5);
     context.fill();
-    context.strokeStyle = "#626861";
+    context.strokeStyle = "#6f746f";
+    context.lineWidth = 1.3;
     context.stroke();
-    for (let i = -25; i <= 25; i += 10) {
-      context.fillStyle = "#333936";
+    for (let i = -34; i <= 34; i += 13.5) {
+      context.fillStyle = "#383d3a";
       context.beginPath();
-      context.arc(bodyX + i, bodyY, 4, 0, Math.PI * 2);
+      context.arc(i, 0, 5.3, 0, Math.PI * 2);
       context.fill();
-      context.strokeStyle = "#777b72";
+      context.strokeStyle = "#858a82";
       context.stroke();
     }
 
     context.fillStyle = darkAccent;
     context.beginPath();
-    context.moveTo(bodyX - 27, bodyY - 9);
-    context.lineTo(bodyX - 18, bodyY - 19);
-    context.lineTo(bodyX + 22, bodyY - 18);
-    context.lineTo(bodyX + 30, bodyY - 9);
+    context.moveTo(-35, -10);
+    context.lineTo(-25, -25);
+    context.lineTo(27, -24);
+    context.lineTo(39, -10);
     context.closePath();
     context.fill();
     context.strokeStyle = accent;
+    context.lineWidth = 1.4;
     context.stroke();
 
-    const turretX = bodyX + (team === "blue" ? 4 : -4);
-    const turretY = bodyY - 20;
-    context.save();
-    context.translate(turretX, turretY);
-    context.rotate(-directionAngle);
-    context.fillStyle = "#777b72";
-    context.fillRect(0, -2.1, 42, 4.2);
-    context.fillStyle = "#242825";
-    context.fillRect(35, -4, 9, 8);
-    context.restore();
     context.fillStyle = accent;
     context.beginPath();
-    context.ellipse(turretX, turretY, 15, 7, 0, 0, Math.PI * 2);
+    context.ellipse(6, -29, 18, 8.5, 0, 0, Math.PI * 2);
     context.fill();
-    context.strokeStyle = "#202421";
+    context.strokeStyle = "#202522";
     context.stroke();
+    context.fillStyle = "#393e3a";
+    context.fillRect(-4, -39, 15, 7);
+
+    context.save();
+    context.translate(11, -30);
+    context.rotate(-directionAngle);
+    context.fillStyle = "#858a83";
+    context.fillRect(0, -2.5, 56, 5);
+    context.fillStyle = "#252a27";
+    context.fillRect(47, -4.5, 11, 9);
+    context.restore();
 
     if (integrity < .72) {
-      context.strokeStyle = "rgba(20,20,18,.9)";
-      context.lineWidth = 1.5;
+      context.strokeStyle = "rgba(15,16,14,.95)";
+      context.lineWidth = 1.7;
       const cracks = integrity < .35 ? 4 : 2;
       for (let i = 0; i < cracks; i += 1) {
-        const x = bodyX - 15 + i * 10;
+        const x = -20 + i * 14;
         context.beginPath();
-        context.moveTo(x, bodyY - 16);
-        context.lineTo(x + 5, bodyY - 10);
-        context.lineTo(x + 1, bodyY - 5);
+        context.moveTo(x, -24);
+        context.lineTo(x + 6, -17);
+        context.lineTo(x + 1, -10);
         context.stroke();
       }
     }
 
     if (!tank.alive) {
-      context.fillStyle = "rgba(20,20,18,.52)";
-      context.fillRect(bodyX - 30, bodyY - 20, 60, 25);
-      context.strokeStyle = "#ddd9cd";
-      context.lineWidth = 1.4;
+      context.fillStyle = "rgba(10,11,10,.48)";
+      context.fillRect(-39, -28, 78, 36);
+      context.strokeStyle = "#e4e1d7";
+      context.lineWidth = 1.5;
       context.beginPath();
-      context.moveTo(bodyX, bodyY - 23);
-      context.lineTo(bodyX, bodyY - 44);
+      context.moveTo(0, -37);
+      context.lineTo(0, -60);
       context.stroke();
-      context.fillStyle = "#ece9df";
+      context.fillStyle = "#f1eee4";
       context.beginPath();
-      context.moveTo(bodyX, bodyY - 44);
-      context.lineTo(bodyX + (team === "blue" ? 15 : -15), bodyY - 39);
-      context.lineTo(bodyX, bodyY - 34);
+      context.moveTo(0, -60);
+      context.lineTo(20, -54);
+      context.lineTo(0, -47);
       context.closePath();
       context.fill();
     }
+    context.restore();
     context.restore();
   }
 
@@ -1604,7 +1719,8 @@
     const roundControlBusy = Boolean(animation || movementAnimation || pendingActionRequest || localActionRequest);
     dom.restartRoundButton.disabled = roundControlBusy;
     dom.regenerateMapButton.disabled = roundControlBusy;
-    dom.changeWorldButton.disabled = roundControlBusy || dom.gameLocationSelect.value === gameState.settings.location;
+    dom.changeWorldButton.disabled = true;
+    dom.applyGameSettingsButton.disabled = roundControlBusy || !settingsDiffer(readMatchSettings(), gameState.settings);
 
     if (gameState.winner) dom.moveStatus.textContent = "Battle complete";
     else if (deployReady) dom.moveStatus.textContent = "Press Space to deploy parachute";
@@ -1712,7 +1828,13 @@
       return false;
     }
     gameState.credits[team] -= cost;
-    gameState.inventory[team][item] += 1;
+    if (item === "engine") {
+      gameState.upgrades[team].engine = true;
+      gameState.inventory[team].engine = 0;
+      if (gameState.turn === team) gameState.movedThisTurn = gameState.movesUsedThisTurn >= maxMovesForTeam(team);
+    } else {
+      gameState.inventory[team][item] += 1;
+    }
     const name = item === "engine" ? "bigger engine" : item === "repair" ? "repair kit" : weaponLabel(item);
     const message = `${TEAM_NAMES[team]} bought ${name} for ${cost} credits.`;
     if (team === localTeam() && pendingArmAfterPurchase && ["parachute", "bigBertha", "teleport"].includes(item)) {
@@ -2380,14 +2502,14 @@
 
     const hitTeams = Array.isArray(packet.hitTeams) ? packet.hitTeams : (packet.hitTeam ? [packet.hitTeam] : []);
     if (hitTeams.length) {
-      hitTeams.forEach(team => addEvent(`BLAST HIT on ${TEAM_NAMES[team]}!`, "hit"));
+      hitTeams.forEach(team => addEvent(`${TEAM_NAMES[packet.shooter]} hit ${TEAM_NAMES[team]} with the blast.`, "hit"));
       playHitSound();
     } else if (packet.impact && packet.impact.type === "terrain") {
-      addEvent("Ground impact.");
+      addEvent(`${TEAM_NAMES[packet.shooter]} struck the ground.`);
     } else if (packet.impact && packet.impact.type === "ceiling") {
-      addEvent("Cave roof impact.");
+      addEvent(`${TEAM_NAMES[packet.shooter]} struck the cave roof.`);
     } else {
-      addEvent("Shot left the battlefield.");
+      addEvent(`${TEAM_NAMES[packet.shooter]}'s shot left the battlefield.`);
       playMissSound();
     }
 
@@ -2543,10 +2665,20 @@
     return { team: match[1].toLowerCase(), name: match[2], cost: Number(match[3]) };
   }
 
+  function purchaseInstruction(name) {
+    const key = String(name || "").toLowerCase();
+    if (key.includes("parachute")) return "Fire it normally, then press Space again to open the parachute and drift down.";
+    if (key.includes("bertha")) return "Arm it in the Armoury. It makes a large circular crater and costs the opponent a double turn.";
+    if (key.includes("teleport")) return "Arm it, then click or touch the battlefield to move your tank there.";
+    if (key.includes("engine")) return "Installed immediately. You now have three moves on every turn, including this one.";
+    if (key.includes("repair")) return "Use it from the Armoury on your turn to remove one recorded hit.";
+    return "The item is now available in your Armoury.";
+  }
+
   function handlePurchaseFeedback(team, name, cost) {
     playPurchaseSound();
     if (team !== localTeam() || dom.gameScreen.classList.contains("hidden")) return;
-    showCanvasMessage("PURCHASE CONFIRMED", `${name} added to the ${TEAM_NAMES[team]} armoury · ${cost} credits`, "purchase");
+    showCanvasMessage("PURCHASE CONFIRMED", `${name} · ${cost} credits. ${purchaseInstruction(name)}`, "purchase");
   }
 
   function updateRoundOverDock() {
@@ -2608,6 +2740,7 @@
     if (action === "restart") return "restart this battlefield";
     if (action === "regenerate") return "generate a new battlefield";
     if (action === "change-world") return `change the world to ${LOCATION_PRESETS[payload.location]?.label || "another world"}`;
+    if (action === "change-settings") return "apply new match settings and start a fresh round";
     return "play another round";
   }
 
@@ -2622,6 +2755,7 @@
     if (!connection || !connection.open || !accepted) return;
     localActionRequest = { action, payload };
     sendNetwork({ type: "action-request", action, payload, sender: localTeam() });
+    if (currentScreen !== "game") setScreen("game");
     showCanvasMessage(
       `${action === "replay" ? "REPLAY" : "BATTLEFIELD"} REQUESTED`,
       `Waiting for ${TEAM_NAMES[OTHER_TEAM[localTeam()]]} to accept.`,
@@ -2632,14 +2766,29 @@
   }
 
   function requestWorldChange() {
+    requestSettingsChangeFromBattlefield();
+  }
+
+  function requestSettingsChangeFromBattlefield() {
     if (!gameState) return;
-    const location = dom.gameLocationSelect.value;
-    if (location === gameState.settings.location) return;
-    requestRoundAction("change-world", { location });
+    const settings = readMatchSettings();
+    if (!settingsDiffer(settings, gameState.settings)) return;
+    requestRoundAction("change-settings", { settings });
+  }
+
+  function requestSettingsChangeFromMenu() {
+    if (!gameState) return;
+    const settings = sanitiseSettings(readSettings());
+    if (!settingsDiffer(settings, gameState.settings)) {
+      dom.homeNotice.textContent = "Those settings already match the current battle.";
+      return;
+    }
+    dom.homeNotice.textContent = "";
+    requestRoundAction("change-settings", { settings });
   }
 
   function receiveActionRequest(data) {
-    if (!gameState || !accepted || !["restart", "regenerate", "replay", "change-world"].includes(data.action)) return;
+    if (!gameState || !accepted || !["restart", "regenerate", "replay", "change-world", "change-settings"].includes(data.action)) return;
     if (pendingActionRequest || localActionRequest) {
       sendNetwork({ type: "action-response", action: data.action, accepted: false, reason: "busy" });
       return;
@@ -2720,10 +2869,15 @@
       const settings = locationSettings(location, gameState.settings);
       state = createGameState(settings, { scores, round: nextRound });
       message = `Round ${nextRound}: world changed to ${LOCATION_PRESETS[location].label}.`;
+    } else if (action === "change-settings") {
+      const settings = sanitiseSettings(payload.settings || gameState.settings);
+      state = createGameState(settings, { scores, round: nextRound });
+      message = `Round ${nextRound}: new match settings applied.`;
     } else {
       state = createGameState(gameState.settings, { scores, round: nextRound });
       message = `Round ${nextRound}: a new battlefield was generated.`;
     }
+    message += ` ${TEAM_NAMES[state.turn]} has the opening shot.`;
 
     pendingActionRequest = null;
     localActionRequest = null;
@@ -2747,7 +2901,7 @@
     state.inventory = { blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }, red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 } };
     state.upgrades = { blue: { engine: false }, red: { engine: false } };
     state.round = roundNumber;
-    state.turn = "blue";
+    state.turn = roundNumber % 2 === 0 ? "red" : "blue";
     state.turnsRemaining = 1;
     state.bonusFromDouble = false;
     state.movedThisTurn = false;
@@ -4461,13 +4615,6 @@
     if (!panel) return;
     const collapsed = forceCollapsed === null ? !panel.classList.contains("collapsed") : forceCollapsed;
 
-    // The right-hand cockpit is an accordion for detailed windows. This keeps
-    // every button readable without allowing panels to overlap or leave the viewport.
-    if (!collapsed && panel.parentElement === dom.sideColumn && panel.dataset.panel !== "chat") {
-      dom.sideColumn.querySelectorAll(".collapsible-panel").forEach(other => {
-        if (other !== panel && other.dataset.panel !== "chat") setPanelCollapsed(other, true);
-      });
-    }
     setPanelCollapsed(panel, collapsed);
     markCanvasResize();
   }
@@ -4492,7 +4639,7 @@
     const armoury = dom.sideColumn.querySelector('[data-panel="armoury"]');
     dom.sideColumn.querySelectorAll(".collapsible-panel").forEach(panel => {
       delete panel.dataset.autoPrepared;
-      if (panel.dataset.panel === "armoury") setPanelCollapsed(panel, false);
+      if (panel.dataset.panel === "armoury" || panel.dataset.panel === "telemetry") setPanelCollapsed(panel, false);
       else if (panel.dataset.panel === "chat") setPanelCollapsed(panel, window.innerWidth <= 720);
       else setPanelCollapsed(panel, true);
     });
@@ -4507,8 +4654,8 @@
     document.querySelectorAll(".collapsible-panel").forEach(panel => {
       if (!panel.dataset.autoPrepared) {
         panel.dataset.autoPrepared = "true";
-        if (panel.dataset.panel === "log" || panel.dataset.panel === "telemetry" || panel.dataset.panel === "battlefield") setPanelCollapsed(panel, true);
-        if (panel.dataset.panel === "armoury") setPanelCollapsed(panel, false);
+        if (panel.dataset.panel === "log" || panel.dataset.panel === "battlefield") setPanelCollapsed(panel, true);
+        if (panel.dataset.panel === "armoury" || panel.dataset.panel === "telemetry") setPanelCollapsed(panel, false);
         if ((short || narrow) && panel.dataset.panel === "chat") setPanelCollapsed(panel, true);
       }
     });
@@ -4520,8 +4667,6 @@
     const opening = panel.classList.contains("collapsed");
     if (window.innerWidth <= 720) {
       panel.classList.toggle("mobile-open", opening);
-      const chat = dom.sideColumn.querySelector('[data-panel="chat"]');
-      if (opening && chat) setPanelCollapsed(chat, true);
     }
     togglePanel(panel, !opening);
     dom.armouryToolButton.classList.toggle("active", opening);
@@ -4629,7 +4774,9 @@
   dom.fullscreenButton.addEventListener("click", toggleFullscreen);
   dom.restartRoundButton.addEventListener("click", () => requestRoundAction("restart"));
   dom.regenerateMapButton.addEventListener("click", () => requestRoundAction("regenerate"));
-  dom.gameLocationSelect.addEventListener("change", updateGameControls);
+  [dom.gameLocationSelect, dom.gameGravityInput, dom.gameTankSizeInput, dom.gameWorldSizeSelect, dom.gameWindSelect, dom.gameHitsInput]
+    .forEach(control => control.addEventListener("input", updateGameControls));
+  dom.applyGameSettingsButton.addEventListener("click", requestSettingsChangeFromBattlefield);
   dom.changeWorldButton.addEventListener("click", requestWorldChange);
   dom.replayRequestButton.addEventListener("click", () => requestRoundAction("replay"));
   dom.roundOverReplayButton.addEventListener("click", () => requestRoundAction("replay"));
@@ -4645,6 +4792,7 @@
     setConnectionStatus(role === "bot" ? "Computer opponent" : "Connected directly", "online");
     updateGameUI(true);
   });
+  dom.connectedApplySettingsButton.addEventListener("click", requestSettingsChangeFromMenu);
   dom.disconnectSessionButton.addEventListener("click", resetAll);
   document.addEventListener("keydown", keyboardControls);
   document.addEventListener("fullscreenchange", updateFullscreenButton);
