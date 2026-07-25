@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-to-four player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v17</title>
-  <link rel="stylesheet" href="style.css?v=17">
+  <title>Red vs Blue — P2P Tanks v18</title>
+  <link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -206,7 +206,6 @@
                   <div class="tank-card-title"><span class="team-swatch blue"></span><div class="tank-identity"><strong id="bluePlayerName">BLUE</strong><small id="blueTankName">BLUE TANK</small></div><span id="blueRoleLabel">HOST</span></div>
                   <div class="tank-card-visual-row">
                     <canvas id="blueStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Blue tank orientation and condition"></canvas>
-                    <div class="integrity-readout"><span>INTEGRITY</span><strong id="blueIntegrityLabel">100%</strong><i><b id="blueIntegrityFill"></b></i></div>
                   </div>
                   <div id="blueLoadout" class="team-loadout" aria-label="Blue purchases"><span class="loadout-empty">NO PURCHASES</span></div>
                   <div id="blueRecentActions" class="recent-actions" aria-label="Blue's two most recent actions"><span>Awaiting action</span></div>
@@ -216,7 +215,6 @@
                   <div class="tank-card-title"><span class="team-swatch red"></span><div class="tank-identity"><strong id="redPlayerName">RED</strong><small id="redTankName">RED TANK</small></div><span id="redRoleLabel">GUEST 1</span></div>
                   <div class="tank-card-visual-row">
                     <canvas id="redStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Red tank orientation and condition"></canvas>
-                    <div class="integrity-readout"><span>INTEGRITY</span><strong id="redIntegrityLabel">100%</strong><i><b id="redIntegrityFill"></b></i></div>
                   </div>
                   <div id="redLoadout" class="team-loadout" aria-label="Red purchases"><span class="loadout-empty">NO PURCHASES</span></div>
                   <div id="redRecentActions" class="recent-actions" aria-label="Red's two most recent actions"><span>Awaiting action</span></div>
@@ -226,7 +224,6 @@
                   <div class="tank-card-title"><span class="team-swatch green"></span><div class="tank-identity"><strong id="greenPlayerName">GREEN</strong><small id="greenTankName">GREEN TANK</small></div><span id="greenRoleLabel">GUEST 2</span></div>
                   <div class="tank-card-visual-row">
                     <canvas id="greenStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Green tank orientation and condition"></canvas>
-                    <div class="integrity-readout"><span>INTEGRITY</span><strong id="greenIntegrityLabel">100%</strong><i><b id="greenIntegrityFill"></b></i></div>
                   </div>
                   <div id="greenLoadout" class="team-loadout" aria-label="Green purchases"><span class="loadout-empty">NO PURCHASES</span></div>
                   <div id="greenRecentActions" class="recent-actions" aria-label="Green's two most recent actions"><span>Awaiting action</span></div>
@@ -236,7 +233,6 @@
                   <div class="tank-card-title"><span class="team-swatch yellow"></span><div class="tank-identity"><strong id="yellowPlayerName">YELLOW</strong><small id="yellowTankName">YELLOW TANK</small></div><span id="yellowRoleLabel">GUEST 3</span></div>
                   <div class="tank-card-visual-row">
                     <canvas id="yellowStatusTankCanvas" class="status-tank-canvas" width="190" height="72" aria-label="Yellow tank orientation and condition"></canvas>
-                    <div class="integrity-readout"><span>INTEGRITY</span><strong id="yellowIntegrityLabel">100%</strong><i><b id="yellowIntegrityFill"></b></i></div>
                   </div>
                   <div id="yellowLoadout" class="team-loadout" aria-label="Yellow purchases"><span class="loadout-empty">NO PURCHASES</span></div>
                   <div id="yellowRecentActions" class="recent-actions" aria-label="Yellow's two most recent actions"><span>Awaiting action</span></div>
@@ -329,10 +325,11 @@
                   <button id="parachuteWeaponButton" class="armoury-button" type="button"><strong>Parachute bomb</strong><span>10 CR · owned <b id="parachuteCount">0</b></span></button>
                   <button id="berthaWeaponButton" class="armoury-button" type="button"><strong>Big Bertha</strong><span>10 CR · owned <b id="berthaCount">0</b></span></button>
                   <button id="teleportWeaponButton" class="armoury-button" type="button"><strong>Teleport</strong><span>10 CR · owned <b id="teleportCount">0</b></span></button>
+                  <button id="tunnelWeaponButton" class="armoury-button tunnel-button" type="button"><strong>Tunnel</strong><span id="tunnelStatus">2 CR · uses one move</span></button>
                   <button id="engineUpgradeButton" class="armoury-button" type="button"><strong>Bigger engine</strong><span id="engineStatus">10 CR · owned 0</span></button>
                   <button id="repairKitButton" class="armoury-button" type="button"><strong>Repair kit</strong><span>20 CR · owned <b id="repairCount">0</b></span></button>
                 </div>
-                <small class="armoury-note">Special weapons give the opponent a double turn. Press Space again during a parachute shot to deploy it.</small>
+                <small class="armoury-note">Special weapons give the opponent a double turn. Tunnel costs 2 credits per use and consumes one movement allowance.</small>
               </div>
             </section>
 
@@ -406,6 +403,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

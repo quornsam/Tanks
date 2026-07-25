@@ -2024,3 +2024,18 @@ body.game-active .chat-log,
   body.game-active .player-card-grid .hit-pips { display: none; }
   body.game-active .player-card-grid .credit-readout { font-size: .38rem; }
 }
+
+
+/* v18 — shared battlefield controls, compact damage bars and underground terrain */
+.hit-pip.filled { background: #c83f3f !important; box-shadow: inset 0 0 0 1px rgba(255,210,205,.18); }
+.hit-pip.half { background: linear-gradient(90deg, #c83f3f 0 50%, #334155 50% 100%) !important; }
+.player-card-grid .tank-card-visual-row { grid-template-columns: minmax(72px, 1fr); }
+.player-card-grid .status-tank-canvas { max-width: 132px; justify-self: center; }
+.integrity-readout { display: none !important; }
+.tunnel-button { border-color: #776b4c; background: linear-gradient(180deg, #373326, #211f19); }
+.tunnel-button.active { border-color: #d0b765; box-shadow: inset 0 0 0 1px rgba(255,231,145,.18); }
+body.game-active .world-tool { display: inline-grid !important; }
+body.game-active .side-column .round-panel.mobile-open { display: block !important; }
+@media (min-width: 721px) {
+  body.game-active .side-column .round-panel { display: block !important; }
+}

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 17;
+  const APP_VERSION = 18;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -12,7 +12,8 @@
   const MAX_POWER = 200;
   const STANDARD_POWER = 80;
   const OFFSCREEN_RETURN_SECONDS = 5;
-  const WEAPON_COSTS = { parachute: 10, bigBertha: 10, teleport: 10, engine: 10, repair: 20 };
+  const WEAPON_COSTS = { tunnel: 2, parachute: 10, bigBertha: 10, teleport: 10, engine: 10, repair: 20 };
+  const LOW_GRAVITY_TERRAIN_LIMIT = 3.75;
   const ACTIVE_FRAME_INTERVAL = 1000 / ACTIVE_RENDER_FPS;
   const TEAM_ORDER = ["blue", "red", "green", "yellow"];
   const GUEST_TEAMS = ["red", "green", "yellow"];
@@ -120,14 +121,6 @@
     redStatusTankCanvas: $("redStatusTankCanvas"),
     greenStatusTankCanvas: $("greenStatusTankCanvas"),
     yellowStatusTankCanvas: $("yellowStatusTankCanvas"),
-    blueIntegrityLabel: $("blueIntegrityLabel"),
-    redIntegrityLabel: $("redIntegrityLabel"),
-    greenIntegrityLabel: $("greenIntegrityLabel"),
-    yellowIntegrityLabel: $("yellowIntegrityLabel"),
-    blueIntegrityFill: $("blueIntegrityFill"),
-    redIntegrityFill: $("redIntegrityFill"),
-    greenIntegrityFill: $("greenIntegrityFill"),
-    yellowIntegrityFill: $("yellowIntegrityFill"),
     turnLabel: $("turnLabel"),
     windLabel: $("windLabel"),
     scoreboardStrip: $("scoreboardStrip"),
@@ -171,11 +164,13 @@
     parachuteWeaponButton: $("parachuteWeaponButton"),
     berthaWeaponButton: $("berthaWeaponButton"),
     teleportWeaponButton: $("teleportWeaponButton"),
+    tunnelWeaponButton: $("tunnelWeaponButton"),
     engineUpgradeButton: $("engineUpgradeButton"),
     repairKitButton: $("repairKitButton"),
     parachuteCount: $("parachuteCount"),
     berthaCount: $("berthaCount"),
     teleportCount: $("teleportCount"),
+    tunnelStatus: $("tunnelStatus"),
     engineStatus: $("engineStatus"),
     repairCount: $("repairCount"),
     telemetryGravity: $("telemetryGravity"),
@@ -206,10 +201,10 @@
   };
 
   const teamDom = {
-    blue: { card: dom.blueTankCard, playerName: dom.bluePlayerName, tankName: dom.blueTankName, role: dom.blueRoleLabel, loadout: dom.blueLoadout, recent: dom.blueRecentActions, hits: dom.blueHits, credits: dom.blueCredits, canvas: dom.blueStatusTankCanvas, integrityLabel: dom.blueIntegrityLabel, integrityFill: dom.blueIntegrityFill },
-    red: { card: dom.redTankCard, playerName: dom.redPlayerName, tankName: dom.redTankName, role: dom.redRoleLabel, loadout: dom.redLoadout, recent: dom.redRecentActions, hits: dom.redHits, credits: dom.redCredits, canvas: dom.redStatusTankCanvas, integrityLabel: dom.redIntegrityLabel, integrityFill: dom.redIntegrityFill },
-    green: { card: dom.greenTankCard, playerName: dom.greenPlayerName, tankName: dom.greenTankName, role: dom.greenRoleLabel, loadout: dom.greenLoadout, recent: dom.greenRecentActions, hits: dom.greenHits, credits: dom.greenCredits, canvas: dom.greenStatusTankCanvas, integrityLabel: dom.greenIntegrityLabel, integrityFill: dom.greenIntegrityFill },
-    yellow: { card: dom.yellowTankCard, playerName: dom.yellowPlayerName, tankName: dom.yellowTankName, role: dom.yellowRoleLabel, loadout: dom.yellowLoadout, recent: dom.yellowRecentActions, hits: dom.yellowHits, credits: dom.yellowCredits, canvas: dom.yellowStatusTankCanvas, integrityLabel: dom.yellowIntegrityLabel, integrityFill: dom.yellowIntegrityFill }
+    blue: { card: dom.blueTankCard, playerName: dom.bluePlayerName, tankName: dom.blueTankName, role: dom.blueRoleLabel, loadout: dom.blueLoadout, recent: dom.blueRecentActions, hits: dom.blueHits, credits: dom.blueCredits, canvas: dom.blueStatusTankCanvas },
+    red: { card: dom.redTankCard, playerName: dom.redPlayerName, tankName: dom.redTankName, role: dom.redRoleLabel, loadout: dom.redLoadout, recent: dom.redRecentActions, hits: dom.redHits, credits: dom.redCredits, canvas: dom.redStatusTankCanvas },
+    green: { card: dom.greenTankCard, playerName: dom.greenPlayerName, tankName: dom.greenTankName, role: dom.greenRoleLabel, loadout: dom.greenLoadout, recent: dom.greenRecentActions, hits: dom.greenHits, credits: dom.greenCredits, canvas: dom.greenStatusTankCanvas },
+    yellow: { card: dom.yellowTankCard, playerName: dom.yellowPlayerName, tankName: dom.yellowTankName, role: dom.yellowRoleLabel, loadout: dom.yellowLoadout, recent: dom.yellowRecentActions, hits: dom.yellowHits, credits: dom.yellowCredits, canvas: dom.yellowStatusTankCanvas }
   };
 
   let ctx = dom.canvas.getContext("2d");
@@ -298,6 +293,7 @@
     delete packet.baseTerrain;
     delete packet.ceiling;
     delete packet.baseCeiling;
+    delete packet.tunnels;
     return packet;
   }
 
@@ -322,6 +318,7 @@
     packet.baseTerrain = packet.terrain.slice();
     packet.ceiling = ceiling ? ceiling.map(value => round(value, 3)) : null;
     packet.baseCeiling = packet.ceiling ? packet.ceiling.slice() : null;
+    packet.tunnels = [];
     return normalizeGameState(packet);
   }
 
@@ -332,6 +329,7 @@
     packet.baseTerrain = sourceState.baseTerrain.slice();
     packet.ceiling = sourceState.ceiling ? sourceState.ceiling.slice() : null;
     packet.baseCeiling = sourceState.baseCeiling ? sourceState.baseCeiling.slice() : null;
+    packet.tunnels = Array.isArray(sourceState.tunnels) ? deepClone(sourceState.tunnels) : [];
     return normalizeGameState(packet);
   }
 
@@ -804,6 +802,15 @@
     return 90 - clamp(Number(aim) || 0, -85, 85);
   }
 
+  // Tunnel mode mirrors the chosen elevation below the horizon. The slider's
+  // left/right direction remains unchanged, but the barrel cuts into the ground.
+  function tunnelWorldAngle(aim) {
+    const safe = clamp(Number(aim) || 0, -85, 85);
+    const depression = 90 - Math.abs(safe);
+    if (Math.abs(safe) < 0.01) return -90;
+    return safe < 0 ? 180 + depression : -depression;
+  }
+
   function normaliseAimAngle(team, angle, version = 10) {
     const value = Number(angle);
     if (!Number.isFinite(value)) return (team === "green" || team === "yellow") ? -45 : 45;
@@ -1183,11 +1190,17 @@
 
       case "state":
         if (role !== "guest") return;
+        if (data.tunnel && gameState) {
+          gameState.tunnels = Array.isArray(gameState.tunnels) ? gameState.tunnels : [];
+          gameState.tunnels.push(data.tunnel);
+          gameState.tunnels = gameState.tunnels.slice(-64);
+          if (data.movement?.team === localTeam()) selectedWeapon = "standard";
+        }
         gameState = mergeRuntimeMetadata(data.state, gameState);
         if (!gameState) return;
         localInputPending = false;
         animation = null;
-        if (data.movement) startMovementAnimation(data.movement.team, data.movement.fromX, data.movement.toX, false);
+        if (data.movement) startMovementAnimation(data.movement.team, data.movement.fromX, data.movement.toX, false, data.movement.fromY, data.movement.toY, data.movement.type);
         if (pendingArmAfterPurchase) {
           const arm = pendingArmAfterPurchase;
           pendingArmAfterPurchase = null;
@@ -1386,6 +1399,7 @@
       baseTerrain: terrain.map(value => round(value, 3)),
       ceiling: ceiling ? ceiling.map(value => round(value, 3)) : null,
       baseCeiling: ceiling ? ceiling.map(value => round(value, 3)) : null,
+      tunnels: [],
       spawnPositions: deepClone(spawnPositions),
       tanks,
       credits,
@@ -1660,6 +1674,9 @@
       renderRecentPlayerActions(team);
     }
     if (dom.connectionBadge) dom.connectionBadge.textContent = role === "bot" ? "LOCAL" : `${stateTeams().length}P P2P`;
+    dom.worldToolButton?.classList.remove("hidden");
+    const sharedBattlefieldPanel = dom.sideColumn?.querySelector('[data-panel="battlefield"]');
+    sharedBattlefieldPanel?.classList.remove("hidden");
     dom.roundControlBadge.textContent = role === "bot" ? "LOCAL" : role === "host" ? "HOST" : "REQUEST";
     dom.roundControlNote.textContent = role === "bot"
       ? "World changes and map resets happen immediately against the bot."
@@ -1682,6 +1699,7 @@
     state.upgrades = state.upgrades || {};
     state.tanks = state.tanks || {};
     state.spawnPositions = state.spawnPositions || {};
+    state.tunnels = Array.isArray(state.tunnels) ? state.tunnels.slice(-64) : [];
     for (const team of state.activeTeams) {
       state.players[team] = {
         playerName: cleanProfileText(state.players[team]?.playerName, TEAM_NAMES[team]),
@@ -1698,7 +1716,7 @@
       if (!Number.isFinite(state.spawnPositions[team])) state.spawnPositions[team] = state.tanks[team].x;
       state.tanks[team].angle = normaliseAimAngle(team, state.tanks[team].angle, incomingVersion);
       state.tanks[team].power = clamp(Number(state.tanks[team].power) || STANDARD_POWER, 18, MAX_POWER);
-      state.tanks[team].hits = Math.max(0, Math.floor(Number(state.tanks[team].hits) || 0));
+      state.tanks[team].hits = Math.max(0, Math.round((Number(state.tanks[team].hits) || 0) * 2) / 2);
       if (typeof state.tanks[team].alive !== "boolean") state.tanks[team].alive = state.tanks[team].hits < state.settings.hitsToDestroy;
     }
     if (!Number.isFinite(state.round)) state.round = 1;
@@ -1772,7 +1790,6 @@
       parts.card.classList.toggle("destroyed", !tanks[team].alive);
       updateTeamLoadout(team);
       renderHitPips(parts.hits, tanks[team].hits, settings.hitsToDestroy);
-      updateIntegrityReadout(team);
     }
     updateArmouryUI();
     drawStatusTankPanels(performance.now());
@@ -1802,19 +1819,6 @@
     requestRender();
   }
 
-  function updateIntegrityReadout(team) {
-    if (!gameState || !gameState.tanks[team]) return;
-    const hitsNeeded = Math.max(1, gameState.settings.hitsToDestroy);
-    const hits = clamp(gameState.tanks[team].hits || 0, 0, hitsNeeded);
-    const integrity = Math.max(0, Math.round((1 - hits / hitsNeeded) * 100));
-    const label = teamDom[team]?.integrityLabel;
-    const fill = teamDom[team]?.integrityFill;
-    if (label) label.textContent = `${integrity}%`;
-    if (fill) {
-      fill.style.width = `${integrity}%`;
-      fill.dataset.level = integrity <= 25 ? "critical" : integrity <= 55 ? "damaged" : "sound";
-    }
-  }
 
   function statusTankAngle(team, now) {
     if (!animation || animation.packet?.shooter !== team) return gameState?.tanks?.[team]?.angle ?? defaultAimForTeam(team);
@@ -1980,9 +1984,11 @@
 
   function renderHitPips(container, hits, total) {
     container.replaceChildren();
+    const damage = Math.max(0, Number(hits) || 0);
     for (let i = 0; i < total; i += 1) {
+      const remaining = damage - i;
       const pip = document.createElement("span");
-      pip.className = `hit-pip${i < hits ? " filled" : ""}`;
+      pip.className = `hit-pip${remaining >= 1 ? " filled" : remaining >= 0.5 ? " half" : ""}`;
       container.appendChild(pip);
     }
   }
@@ -2012,9 +2018,10 @@
     dom.powerIncreaseButton.disabled = !enabled;
     dom.fireButton.disabled = !(enabled || deployReady);
     dom.fireButton.classList.toggle("deploy-ready", deployReady);
-    dom.fireButton.querySelector("span").textContent = deployReady ? "DEPLOY PARACHUTE" : selectedWeapon === "bigBertha" ? "BIG BERTHA" : selectedWeapon === "parachute" ? "PARACHUTE BOMB" : selectedWeapon === "teleport" ? "PLACE TANK" : "FIRE";
+    dom.fireButton.querySelector("span").textContent = deployReady ? "DEPLOY PARACHUTE" : selectedWeapon === "bigBertha" ? "BIG BERTHA" : selectedWeapon === "parachute" ? "PARACHUTE BOMB" : selectedWeapon === "teleport" ? "PLACE TANK" : selectedWeapon === "tunnel" ? "TUNNEL" : "FIRE";
     dom.fireButton.querySelector("small").textContent = deployReady ? "Spacebar again" : "Spacebar";
     dom.doubleStrikeButton.disabled = !enabled || selectedWeapon !== "standard";
+    if (dom.tunnelWeaponButton) dom.tunnelWeaponButton.disabled = !enabled || movesRemaining <= 0 || (gameState.credits?.[localTeam()] || 0) < WEAPON_COSTS.tunnel;
     dom.locatorButton.disabled = Boolean(animation || movementAnimation);
     const roundControlBusy = Boolean(animation || movementAnimation || pendingActionRequest || localActionRequest);
     dom.restartRoundButton.disabled = roundControlBusy;
@@ -2046,6 +2053,7 @@
     dom.parachuteCount.textContent = String(inventory.parachute || 0);
     dom.berthaCount.textContent = String(inventory.bigBertha || 0);
     dom.teleportCount.textContent = String(inventory.teleport || 0);
+    if (dom.tunnelStatus) dom.tunnelStatus.textContent = `${WEAPON_COSTS.tunnel} CR · uses one move`;
     dom.repairCount.textContent = String(inventory.repair || 0);
     dom.engineStatus.textContent = gameState.upgrades?.[team]?.engine ? "INSTALLED · three moves" : `${inventory.engine || 0 ? "INSTALL" : "10 CR"} · owned ${inventory.engine || 0}`;
 
@@ -2053,14 +2061,16 @@
       standard: "Standard shell armed",
       parachute: "Parachute bomb armed — Space launches, Space again deploys",
       bigBertha: "Big Bertha armed — large circular terrain blast",
-      teleport: "Teleport armed — click or touch a destination"
+      teleport: "Teleport armed — click or touch a destination",
+      tunnel: "Tunnel armed — aim into adjacent terrain and press TUNNEL"
     };
     dom.weaponStatus.textContent = labels[selectedWeapon] || labels.standard;
     const buttons = {
       standard: dom.standardWeaponButton,
       parachute: dom.parachuteWeaponButton,
       bigBertha: dom.berthaWeaponButton,
-      teleport: dom.teleportWeaponButton
+      teleport: dom.teleportWeaponButton,
+      tunnel: dom.tunnelWeaponButton
     };
     Object.entries(buttons).forEach(([weapon, button]) => button.classList.toggle("active", selectedWeapon === weapon));
     const busy = Boolean(animation || movementAnimation || pendingActionRequest || localActionRequest || gameState.winner);
@@ -2068,13 +2078,14 @@
     dom.parachuteWeaponButton.disabled = busy || ((inventory.parachute || 0) < 1 && credits < WEAPON_COSTS.parachute);
     dom.berthaWeaponButton.disabled = busy || ((inventory.bigBertha || 0) < 1 && credits < WEAPON_COSTS.bigBertha);
     dom.teleportWeaponButton.disabled = busy || ((inventory.teleport || 0) < 1 && credits < WEAPON_COSTS.teleport);
+    if (dom.tunnelWeaponButton) dom.tunnelWeaponButton.disabled = busy || gameState.turn !== team || gameState.movesUsedThisTurn >= maxMovesForTeam(team) || credits < WEAPON_COSTS.tunnel;
     dom.engineUpgradeButton.disabled = busy || gameState.upgrades?.[team]?.engine || ((inventory.engine || 0) < 1 && credits < WEAPON_COSTS.engine);
     dom.repairKitButton.disabled = busy || ((inventory.repair || 0) < 1 && credits < WEAPON_COSTS.repair);
   }
 
   function armWeapon(weapon) {
     if (!gameState) return;
-    const safe = ["standard", "parachute", "bigBertha", "teleport"].includes(weapon) ? weapon : "standard";
+    const safe = ["standard", "parachute", "bigBertha", "teleport", "tunnel"].includes(weapon) ? weapon : "standard";
     selectedWeapon = safe;
     teleportMode = safe === "teleport";
     dom.canvasFrame.classList.toggle("teleport-active", teleportMode);
@@ -2089,6 +2100,20 @@
 
   function requestArmouryItem(item) {
     if (!gameState || gameState.winner || animation || movementAnimation) return;
+    if (item === "tunnel") {
+      const team = localTeam();
+      if (!canLocalAct() || gameState.movesUsedThisTurn >= maxMovesForTeam(team)) return;
+      if ((gameState.credits?.[team] || 0) < WEAPON_COSTS.tunnel) {
+        addEvent("Tunnel requires 2 credits.", "error");
+        return;
+      }
+      selectedWeapon = "tunnel";
+      doubleStrikeSelected = false;
+      showCanvasMessage("TUNNEL ARMED", "Aim the turret into adjacent terrain, then press TUNNEL. It costs 2 credits and uses one movement allowance.", "purchase");
+      updateArmouryUI();
+      updateGameControls();
+      return;
+    }
     const team = localTeam();
     if (["parachute", "bigBertha", "teleport"].includes(item) && (gameState.inventory[team][item] || 0) > 0) {
       armWeapon(item);
@@ -2262,16 +2287,91 @@
 
     // Tanks may climb steep banks. Their body rotates to match the local surface.
     const fromX = tank.x;
+    const fromY = tankBaseY(gameState, team);
     tank.x = round(candidate, 3);
+    delete tank.tunnelY;
     gameState.movesUsedThisTurn += 1;
     gameState.movedThisTurn = gameState.movesUsedThisTurn >= maxMovesForTeam(team);
     localInputPending = false;
     const remaining = Math.max(0, maxMovesForTeam(team) - gameState.movesUsedThisTurn);
     const message = `${TEAM_NAMES[team]} moved ${direction < 0 ? "left" : "right"}${remaining ? ` (${remaining} move${remaining === 1 ? "" : "s"} left)` : ""}.`;
-    startMovementAnimation(team, fromX, tank.x, true);
+    startMovementAnimation(team, fromX, tank.x, true, fromY, terrainAt(tank.x, gameState), "move");
     playMoveSound();
     addEvent(message);
-    broadcastState(message, { team, fromX, toX: tank.x });
+    broadcastState(message, { team, fromX, toX: tank.x, fromY, toY: terrainAt(tank.x, gameState), type: "move" });
+    updateGameUI(true);
+    return true;
+  }
+
+  function authoritativeTunnel(team, angle) {
+    if (!gameState || animation || movementAnimation || gameState.winner || gameState.turn !== team) return false;
+    if ((gameState.credits?.[team] || 0) < WEAPON_COSTS.tunnel) {
+      rejectGuestInput("Tunnel requires 2 credits.", team);
+      return false;
+    }
+    if (gameState.movesUsedThisTurn >= maxMovesForTeam(team)) {
+      rejectGuestInput("No movement allowance remains for tunnelling.", team);
+      return false;
+    }
+
+    const tank = gameState.tanks[team];
+    const safeAngle = clamp(Number.isFinite(angle) ? angle : tank.angle, -85, 85);
+    const radians = tunnelWorldAngle(safeAngle) * Math.PI / 180;
+    const length = moveStep();
+    const radius = Math.max(tankWorldHeight(gameState) * 0.92, length * 0.22);
+    const startCenter = tankCenter(gameState, team);
+    const x1 = startCenter.x + Math.cos(radians) * tankWorldWidth(gameState) * 0.32;
+    const y1 = startCenter.y + Math.sin(radians) * tankWorldWidth(gameState) * 0.32;
+    const x2 = startCenter.x + Math.cos(radians) * length;
+    const y2 = startCenter.y + Math.sin(radians) * length;
+    const minX = gameState.settings.worldWidth * 0.025;
+    const maxX = gameState.settings.worldWidth * 0.975;
+
+    if (x2 < minX || x2 > maxX || y2 < 2 || y2 > WORLD_HEIGHT - 2) {
+      rejectGuestInput("The proposed tunnel would leave the battlefield.", team);
+      return false;
+    }
+
+    let solidSamples = 0;
+    for (let i = 1; i <= 7; i += 1) {
+      const t = i / 7;
+      const sx = x1 + (x2 - x1) * t;
+      const sy = y1 + (y2 - y1) * t;
+      if (rawSolidAt(sx, sy, gameState)) solidSamples += 1;
+    }
+    if (solidSamples < 3) {
+      rejectGuestInput("Aim into terrain beside the tank to tunnel.", team);
+      return false;
+    }
+
+    const safeDistance = tankWorldWidth(gameState) * 1.15;
+    const blocked = stateTeams(gameState).some(other => other !== team && gameState.tanks[other]?.alive && Math.hypot(x2 - gameState.tanks[other].x, y2 - tankCenter(gameState, other).y) < safeDistance);
+    if (blocked) {
+      rejectGuestInput("Tunnel exit blocked by another tank.", team);
+      return false;
+    }
+
+    const tunnel = { x1: round(x1, 2), y1: round(y1, 2), x2: round(x2, 2), y2: round(y2, 2), r: round(radius, 2), type: "tunnel" };
+    gameState.tunnels = Array.isArray(gameState.tunnels) ? gameState.tunnels : [];
+    gameState.tunnels.push(tunnel);
+    gameState.tunnels = gameState.tunnels.slice(-64);
+    const fromX = tank.x;
+    const fromY = tankBaseY(gameState, team);
+    tank.x = round(x2, 3);
+    tank.tunnelY = round(y2 - tankWorldHeight(gameState) * 0.80, 3);
+    tank.angle = round(safeAngle, 1);
+    gameState.credits[team] -= WEAPON_COSTS.tunnel;
+    gameState.movesUsedThisTurn += 1;
+    gameState.movedThisTurn = gameState.movesUsedThisTurn >= maxMovesForTeam(team);
+    localInputPending = false;
+    const remaining = Math.max(0, maxMovesForTeam(team) - gameState.movesUsedThisTurn);
+    const message = `${TEAM_NAMES[team]} tunnelled through the terrain for 2 credits${remaining ? ` (${remaining} tunnel${remaining === 1 ? "" : "s"} or moves left)` : ""}.`;
+    const movement = { team, fromX, toX: tank.x, fromY, toY: tank.tunnelY, type: "tunnel" };
+    startMovementAnimation(team, fromX, tank.x, true, fromY, tank.tunnelY, "tunnel");
+    playMoveSound();
+    addEvent(message);
+    if (role === "host") broadcastNetwork({ type: "state", state: compactStateMetadata(gameState), message, movement, tunnel });
+    selectedWeapon = "standard";
     updateGameUI(true);
     return true;
   }
@@ -2301,6 +2401,17 @@
       return;
     }
     if (!canLocalAct()) return;
+    if (selectedWeapon === "tunnel") {
+      const angle = Number(dom.angleInput.value);
+      if (role === "guest") {
+        localInputPending = true;
+        sendNetwork({ type: "input", action: "tunnel", angle });
+        updateGameControls();
+      } else {
+        authoritativeTunnel(localTeam(), angle);
+      }
+      return;
+    }
     if (selectedWeapon === "teleport") {
       teleportMode = true;
       dom.canvasFrame.classList.add("teleport-active");
@@ -2370,6 +2481,8 @@
     }
     if (data.action === "move") {
       authoritativeMove(team, Number(data.direction));
+    } else if (data.action === "tunnel") {
+      authoritativeTunnel(team, Number(data.angle));
     } else if (data.action === "fire") {
       const aimAngle = angleFromAimDescriptor(data.aim, Number(data.angle));
       authoritativeFire(team, aimAngle, Number(data.power), Boolean(data.doubleStrike), String(data.weapon || "standard"));
@@ -2379,7 +2492,7 @@
   }
 
   function weaponLabel(weapon) {
-    return ({ parachute: "parachute bomb", bigBertha: "Big Bertha", teleport: "teleport" })[weapon] || "standard shell";
+    return ({ tunnel: "tunnel", parachute: "parachute bomb", bigBertha: "Big Bertha", teleport: "teleport" })[weapon] || "standard shell";
   }
 
   function authoritativeFire(team, angle, power, doubleStrike = false, weapon = "standard") {
@@ -2406,18 +2519,28 @@
     if (weapon !== "standard") resultingState.inventory[team][weapon] = Math.max(0, resultingState.inventory[team][weapon] - 1);
     const blastRadius = shotBlastRadius(resultingState, doubleStrike, weapon);
 
-    const hitTeams = result.impact && result.impact.type !== "out"
-      ? blastHitTeams(baseState, result.impact, blastRadius)
-      : [];
-    if (result.hitTeam && !hitTeams.includes(result.hitTeam)) hitTeams.push(result.hitTeam);
+    const hitDamage = result.impact && result.impact.type !== "out"
+      ? blastDamageByTeam(baseState, result.impact, blastRadius)
+      : {};
+    if (result.hitTeam) hitDamage[result.hitTeam] = 1;
+    const hitTeams = Object.keys(hitDamage);
 
+    let excavation = null;
     if (result.impact && result.impact.type !== "out") {
-      if (result.impact.type === "ceiling") applyCeilingCrater(resultingState, result.impact.x, result.impact.y, blastRadius, weapon === "bigBertha" ? "circular" : "standard");
-      else applyCrater(resultingState, result.impact.x, result.impact.y, blastRadius, weapon === "bigBertha" ? "circular" : "standard");
+      if (lowGravityTerrain(resultingState) && ["terrain", "ceiling"].includes(result.impact.type)) {
+        excavation = createBlastExcavation(resultingState, result.impact, blastRadius);
+        resultingState.tunnels = Array.isArray(resultingState.tunnels) ? resultingState.tunnels : [];
+        resultingState.tunnels.push(excavation);
+        resultingState.tunnels = resultingState.tunnels.slice(-64);
+      } else if (result.impact.type === "ceiling") {
+        applyCeilingCrater(resultingState, result.impact.x, result.impact.y, blastRadius, weapon === "bigBertha" ? "circular" : "standard");
+      } else {
+        applyCrater(resultingState, result.impact.x, result.impact.y, blastRadius, weapon === "bigBertha" ? "circular" : "standard");
+      }
     }
 
-    for (const hitTeam of hitTeams) {
-      resultingState.tanks[hitTeam].hits += 1;
+    for (const [hitTeam, damage] of Object.entries(hitDamage)) {
+      resultingState.tanks[hitTeam].hits = round((resultingState.tanks[hitTeam].hits || 0) + damage, 1);
       if (resultingState.tanks[hitTeam].hits >= resultingState.settings.hitsToDestroy) resultingState.tanks[hitTeam].alive = false;
     }
     if (hitTeams.some(hitTeam => hitTeam !== team)) resultingState.credits[team] += 3;
@@ -2455,6 +2578,8 @@
       impact: result.impact,
       hitTeam: hitTeams[0] || null,
       hitTeams,
+      hitDamage,
+      excavation,
       resultingState: compactStateMetadata(resultingState)
     };
   }
@@ -2508,16 +2633,17 @@
     return craterRadius(state) * (doubleStrike ? 2 : 1);
   }
 
-  function blastHitTeams(state, impact, radius) {
-    const hitTeams = [];
+  function blastDamageByTeam(state, impact, radius) {
+    const damage = {};
     for (const team of stateTeams(state)) {
       if (!state.tanks[team].alive) continue;
       const center = tankCenter(state, team);
-      if (Math.hypot(impact.x - center.x, impact.y - center.y) <= radius + tankCollisionRadius(state)) {
-        hitTeams.push(team);
-      }
+      const distance = Math.hypot(impact.x - center.x, impact.y - center.y);
+      const tankRadius = tankCollisionRadius(state);
+      if (distance <= radius) damage[team] = 1;
+      else if (distance <= radius + tankRadius) damage[team] = 0.5;
     }
-    return hitTeams;
+    return damage;
   }
 
   function simulateShot(state, team, angle, power, recordTrajectory, options = {}) {
@@ -2553,6 +2679,8 @@
         vx += state.wind * 0.2 * dt;
         vy -= state.settings.gravity * dt;
       }
+      const previousX = x;
+      const previousY = y;
       x += vx * dt;
       y += vy * dt;
 
@@ -2589,29 +2717,31 @@
         }
       }
 
-      const ground = terrainAt(x, state);
-      if (step > 4 && y <= ground) {
-        if (recordTrajectory) trajectory.push({ x: round(x), y: round(ground) });
-        return {
-          trajectory,
-          impact: { x: round(x), y: round(ground), type: "terrain" },
-          hitTeam: null,
-          flightTime: elapsed,
-          parachuteDeployIndex
-        };
-      }
-
-      if (state.ceiling) {
-        const roof = ceilingAt(x, state);
-        if (step > 4 && y >= roof) {
-          if (recordTrajectory) trajectory.push({ x: round(x), y: round(roof) });
+      if (step > 4) {
+        const groundImpact = segmentTerrainImpact(previousX, previousY, x, y, state, "ground");
+        if (groundImpact) {
+          if (recordTrajectory) trajectory.push({ x: round(groundImpact.x), y: round(groundImpact.y) });
           return {
             trajectory,
-            impact: { x: round(x), y: round(roof), type: "ceiling" },
+            impact: { x: round(groundImpact.x), y: round(groundImpact.y), type: "terrain" },
             hitTeam: null,
             flightTime: elapsed,
             parachuteDeployIndex
           };
+        }
+
+        if (state.ceiling) {
+          const roofImpact = segmentTerrainImpact(previousX, previousY, x, y, state, "ceiling");
+          if (roofImpact) {
+            if (recordTrajectory) trajectory.push({ x: round(roofImpact.x), y: round(roofImpact.y) });
+            return {
+              trajectory,
+              impact: { x: round(roofImpact.x), y: round(roofImpact.y), type: "ceiling" },
+              hitTeam: null,
+              flightTime: elapsed,
+              parachuteDeployIndex
+            };
+          }
         }
       }
 
@@ -2619,6 +2749,64 @@
     }
 
     return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null, flightTime: elapsed, parachuteDeployIndex };
+  }
+
+  function lowGravityTerrain(state = gameState) {
+    return Boolean(state && Number(state.settings?.gravity) <= LOW_GRAVITY_TERRAIN_LIMIT);
+  }
+
+  function pointInsideExcavation(x, y, state = gameState) {
+    const tunnels = Array.isArray(state?.tunnels) ? state.tunnels : [];
+    return tunnels.some(tunnel => {
+      const dx = tunnel.x2 - tunnel.x1;
+      const dy = tunnel.y2 - tunnel.y1;
+      const lengthSq = dx * dx + dy * dy || 1;
+      const t = clamp(((x - tunnel.x1) * dx + (y - tunnel.y1) * dy) / lengthSq, 0, 1);
+      const px = tunnel.x1 + dx * t;
+      const py = tunnel.y1 + dy * t;
+      return Math.hypot(x - px, y - py) <= tunnel.r;
+    });
+  }
+
+  function rawSolidAt(x, y, state = gameState, surface = "ground") {
+    if (!state || x < 0 || x > state.settings.worldWidth || pointInsideExcavation(x, y, state)) return false;
+    if (surface === "ceiling") return Boolean(state.ceiling && y >= ceilingAt(x, state));
+    return y <= terrainAt(x, state);
+  }
+
+  function segmentTerrainImpact(x1, y1, x2, y2, state, surface) {
+    const samples = 12;
+    let priorT = 0;
+    let priorSolid = rawSolidAt(x1, y1, state, surface);
+    for (let i = 1; i <= samples; i += 1) {
+      const t = i / samples;
+      const sx = x1 + (x2 - x1) * t;
+      const sy = y1 + (y2 - y1) * t;
+      const solid = rawSolidAt(sx, sy, state, surface);
+      if (!priorSolid && solid) {
+        let lo = priorT;
+        let hi = t;
+        for (let n = 0; n < 14; n += 1) {
+          const mid = (lo + hi) / 2;
+          const mx = x1 + (x2 - x1) * mid;
+          const my = y1 + (y2 - y1) * mid;
+          if (rawSolidAt(mx, my, state, surface)) hi = mid; else lo = mid;
+        }
+        const hitT = (lo + hi) / 2;
+        return { x: x1 + (x2 - x1) * hitT, y: y1 + (y2 - y1) * hitT };
+      }
+      priorSolid = solid;
+      priorT = t;
+    }
+    return null;
+  }
+
+  function createBlastExcavation(state, impact, radius) {
+    return {
+      x1: round(impact.x, 2), y1: round(impact.y, 2),
+      x2: round(impact.x, 2), y2: round(impact.y, 2),
+      r: round(Math.max(0.8, radius), 2), type: "blast"
+    };
   }
 
   function muzzlePosition(state, team, angle = state.tanks[team].angle) {
@@ -2631,11 +2819,17 @@
     };
   }
 
+  function tankBaseY(state, team, x = state.tanks[team].x) {
+    const tank = state.tanks[team];
+    if (Number.isFinite(tank.tunnelY)) return tank.tunnelY;
+    return terrainAt(x, state);
+  }
+
   function tankCenter(state, team) {
     const tank = state.tanks[team];
     return {
       x: tank.x,
-      y: terrainAt(tank.x, state) + tankWorldHeight(state) * 0.80
+      y: tankBaseY(state, team) + tankWorldHeight(state) * 0.80
     };
   }
 
@@ -2795,7 +2989,11 @@
       addEvent("Unable to apply the remote shot state.", "error");
       return;
     }
-    if (packet.impact && packet.impact.type !== "out") {
+    if (packet.excavation) {
+      nextState.tunnels = Array.isArray(nextState.tunnels) ? nextState.tunnels : [];
+      nextState.tunnels.push(packet.excavation);
+      nextState.tunnels = nextState.tunnels.slice(-64);
+    } else if (packet.impact && packet.impact.type !== "out") {
       if (packet.impact.type === "ceiling") applyCeilingCrater(nextState, packet.impact.x, packet.impact.y, packet.blastRadius, packet.weapon === "bigBertha" ? "circular" : "standard");
       else applyCrater(nextState, packet.impact.x, packet.impact.y, packet.blastRadius, packet.weapon === "bigBertha" ? "circular" : "standard");
     }
@@ -2804,7 +3002,10 @@
 
     const hitTeams = Array.isArray(packet.hitTeams) ? packet.hitTeams : (packet.hitTeam ? [packet.hitTeam] : []);
     if (hitTeams.length) {
-      hitTeams.forEach(team => addEvent(`${TEAM_NAMES[packet.shooter]} hit ${TEAM_NAMES[team]} with the blast.`, "hit"));
+      hitTeams.forEach(team => {
+        const amount = Number(packet.hitDamage?.[team]) || 1;
+        addEvent(`${TEAM_NAMES[packet.shooter]} ${amount === 0.5 ? "clipped" : "hit"} ${TEAM_NAMES[team]}${amount === 0.5 ? " for half damage" : " with the blast"}.`, "hit");
+      });
       playHitSound();
     } else if (packet.impact && packet.impact.type === "terrain") {
       addEvent(`${TEAM_NAMES[packet.shooter]} struck the ground.`);
@@ -2829,25 +3030,41 @@
     if (role === "host") broadcastNetwork({ type: "state", state: compactStateMetadata(gameState), message, movement });
   }
 
-  function startMovementAnimation(team, fromX, toX, local = false) {
+  function startMovementAnimation(team, fromX, toX, local = false, fromY = null, toY = null, type = "move") {
     if (!gameState || !Number.isFinite(fromX) || !Number.isFinite(toX)) return;
     movementAnimation = {
       team,
       fromX,
       toX,
+      fromY: Number.isFinite(fromY) ? fromY : null,
+      toY: Number.isFinite(toY) ? toY : null,
+      type,
       start: performance.now(),
-      duration: clamp(360 + Math.abs(toX - fromX) * 38, 420, 850),
+      duration: clamp(480 + Math.hypot(toX - fromX, (Number(toY) || 0) - (Number(fromY) || 0)) * 45, 540, 1100),
       local
     };
     updateGameControls();
     requestRender();
   }
 
+  function movementEase(now = performance.now()) {
+    if (!movementAnimation) return 1;
+    const progress = clamp((now - movementAnimation.start) / movementAnimation.duration, 0, 1);
+    return progress < .5 ? 2 * progress * progress : 1 - ((-2 * progress + 2) ** 2) / 2;
+  }
+
   function displayTankX(team, now = performance.now()) {
     if (!movementAnimation || movementAnimation.team !== team) return gameState.tanks[team].x;
-    const progress = clamp((now - movementAnimation.start) / movementAnimation.duration, 0, 1);
-    const eased = progress < .5 ? 2 * progress * progress : 1 - ((-2 * progress + 2) ** 2) / 2;
+    const eased = movementEase(now);
     return movementAnimation.fromX + (movementAnimation.toX - movementAnimation.fromX) * eased;
+  }
+
+  function displayTankBaseY(team, displayX, now = performance.now()) {
+    if (movementAnimation && movementAnimation.team === team && Number.isFinite(movementAnimation.fromY) && Number.isFinite(movementAnimation.toY)) {
+      const eased = movementEase(now);
+      return movementAnimation.fromY + (movementAnimation.toY - movementAnimation.fromY) * eased;
+    }
+    return tankBaseY(gameState, team, displayX);
   }
 
   function scheduleBotTurn() {
@@ -2969,6 +3186,7 @@
 
   function purchaseInstruction(name) {
     const key = String(name || "").toLowerCase();
+    if (key.includes("tunnel")) return "Aim into terrain and press TUNNEL. It costs 2 credits and consumes one movement allowance.";
     if (key.includes("parachute")) return "Fire it normally, then press Space again to open the parachute and drift down.";
     if (key.includes("bertha")) return "Arm it in the Armoury. It makes a large circular crater and costs the opponent a double turn.";
     if (key.includes("teleport")) return "Arm it, then click or touch the battlefield to move your tank there.";
@@ -3049,8 +3267,19 @@
   function requestRoundAction(action, payload = {}) {
     if (!gameState || animation || movementAnimation || pendingActionRequest || localActionRequest) return;
 
-    if (role === "bot" || role === "host") {
+    if (role === "bot") {
       executeRoundAction(action, payload);
+      return;
+    }
+    if (role === "host") {
+      pendingActionRequest = { action, payload, sender: localTeam(), localHost: true };
+      showCanvasMessage(
+        "START A NEW ROUND?",
+        `This will end the current battlefield and ${actionLabel(action, payload)}. Connected players will be moved into the new round.`,
+        "request"
+      );
+      addEvent(`Host is confirming whether to ${actionLabel(action, payload)}.`);
+      updateGameControls();
       return;
     }
 
@@ -3109,17 +3338,17 @@
 
   function acceptActionRequest() {
     if (!pendingActionRequest || role !== "host") return;
-    const { action, payload, sender } = pendingActionRequest;
+    const { action, payload, sender, localHost } = pendingActionRequest;
     pendingActionRequest = null;
-    sendToTeam(sender, { type: "action-response", action, accepted: true });
+    if (!localHost) sendToTeam(sender, { type: "action-response", action, accepted: true });
     executeRoundAction(action, payload);
   }
 
   function declineActionRequest() {
     if (!pendingActionRequest || role !== "host") return;
-    const { action, sender } = pendingActionRequest;
+    const { action, sender, localHost } = pendingActionRequest;
     pendingActionRequest = null;
-    sendToTeam(sender, { type: "action-response", action, accepted: false });
+    if (!localHost) sendToTeam(sender, { type: "action-response", action, accepted: false });
     addEvent("Battlefield request declined.");
     if (gameState?.winner) updateGameUI(false); else hideCanvasMessage();
     updateGameControls();
@@ -3177,6 +3406,7 @@
     const state = deepClone(previous);
     state.terrain = state.baseTerrain.slice();
     state.ceiling = state.baseCeiling ? state.baseCeiling.slice() : null;
+    state.tunnels = [];
     state.tanks = {};
     state.credits = {};
     state.inventory = {};
@@ -3797,6 +4027,7 @@
     drawDistantLandscape();
     drawTerrain();
     if (gameState.ceiling) drawCaveCeiling();
+    drawExcavations();
     drawTankPads();
     activeCanvasMetrics = null;
     ctx = screenCtx;
@@ -4229,6 +4460,33 @@
     ctx.stroke();
   }
 
+  function drawExcavations() {
+    const tunnels = Array.isArray(gameState?.tunnels) ? gameState.tunnels : [];
+    if (!tunnels.length) return;
+    const metrics = canvasMetrics();
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const tunnel of tunnels) {
+      const a = worldToCanvas(tunnel.x1, tunnel.y1);
+      const b = worldToCanvas(tunnel.x2, tunnel.y2);
+      const width = Math.max(3, tunnel.r * metrics.sy * 2);
+      ctx.strokeStyle = "rgba(8,10,10,.92)";
+      ctx.lineWidth = width + Math.max(2, width * .15);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.strokeStyle = tunnel.type === "blast" ? "rgba(29,31,29,.98)" : "rgba(18,22,21,.98)";
+      ctx.lineWidth = width;
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(120,113,91,.28)";
+      ctx.lineWidth = Math.max(1, width * .06);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawTankPads() {
     if (!gameState?.spawnPositions) return;
     const radius = Math.max(6.5, 9.2 * (gameState.settings.tankSize / 100));
@@ -4297,7 +4555,7 @@
   function drawTank(team, now) {
     const tank = gameState.tanks[team];
     const displayX = displayTankX(team, now);
-    const ground = terrainAt(displayX);
+    const ground = displayTankBaseY(team, displayX, now);
     const baseGroundPoint = worldToCanvas(displayX, ground);
     const firingVisual = firingVisualForTank(team, now);
     const groundPoint = {
@@ -4307,7 +4565,7 @@
     const metrics = canvasMetrics();
     const bodyWidth = Math.max(0.45, tankWorldWidth() * metrics.sx);
     const bodyHeight = Math.max(0.28, tankWorldHeight() * metrics.sy);
-    const slope = terrainSlopeAt(displayX);
+    const slope = Number.isFinite(tank.tunnelY) || movementAnimation?.type === "tunnel" ? 0 : terrainSlopeAt(displayX);
     const bodyAngle = clamp(-Math.atan(slope * metrics.sy / metrics.sx), -1.08, 1.08);
     const teamColour = TEAM_COLOURS[team] || TEAM_COLOURS.blue;
     const accent = teamColour.accent;
@@ -4326,13 +4584,16 @@
       : 0;
     const rollPhase = movementProgress * Math.PI * 8 * rollDirection;
 
-    const center = { x: displayX, y: terrainAt(displayX) + tankWorldHeight() * .80 };
+    const center = { x: displayX, y: ground + tankWorldHeight() * .80 };
     const baseTurretPoint = worldToCanvas(center.x, center.y);
     const turretPoint = {
       x: baseTurretPoint.x + firingVisual.offsetX,
       y: baseTurretPoint.y + firingVisual.offsetY
     };
-    const barrelAngle = -(worldAngleForTeam(team, firingVisual.angle) * Math.PI / 180);
+    const displayedWorldAngle = team === localTeam() && selectedWeapon === "tunnel" && canLocalAct()
+      ? tunnelWorldAngle(firingVisual.angle)
+      : worldAngleForTeam(team, firingVisual.angle);
+    const barrelAngle = -(displayedWorldAngle * Math.PI / 180);
     const barrelLength = bodyWidth * 1.08;
     const barrelThickness = Math.max(.55, bodyHeight * .13);
 
@@ -5111,6 +5372,7 @@
   dom.parachuteWeaponButton.addEventListener("click", () => requestArmouryItem("parachute"));
   dom.berthaWeaponButton.addEventListener("click", () => requestArmouryItem("bigBertha"));
   dom.teleportWeaponButton.addEventListener("click", () => requestArmouryItem("teleport"));
+  dom.tunnelWeaponButton.addEventListener("click", () => requestArmouryItem("tunnel"));
   dom.engineUpgradeButton.addEventListener("click", () => requestArmouryItem("engine"));
   dom.repairKitButton.addEventListener("click", () => requestArmouryItem("repair"));
   dom.chatForm.addEventListener("submit", submitChat);
