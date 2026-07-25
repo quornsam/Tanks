@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v9</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <title>Red vs Blue — P2P Tanks v10</title>
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -176,7 +176,7 @@
             <div class="battle-hud">
               <div class="tank-card blue-card">
                 <div class="tank-card-title"><span class="team-swatch blue"></span><strong>BLUE</strong><span id="blueRoleLabel">HOST</span></div>
-                <div id="blueHits" class="hit-pips" aria-label="Blue tank damage"></div>
+                <div id="blueHits" class="hit-pips" aria-label="Blue tank damage"></div><span id="blueCredits" class="credit-readout">50 CR</span>
               </div>
 
               <div class="turn-card">
@@ -191,7 +191,7 @@
 
               <div class="tank-card red-card">
                 <div class="tank-card-title"><span id="redRoleLabel">GUEST</span><strong>RED</strong><span class="team-swatch red"></span></div>
-                <div id="redHits" class="hit-pips" aria-label="Red tank damage"></div>
+                <div id="redHits" class="hit-pips" aria-label="Red tank damage"></div><span id="redCredits" class="credit-readout">50 CR</span>
               </div>
             </div>
 
@@ -228,13 +228,13 @@
               </div>
 
               <label class="aim-control">
-                <span class="control-title">ANGLE <output id="angleOutput">45°</output></span>
-                <input id="angleInput" type="range" min="5" max="85" step="1" value="45">
+                <span class="control-title">DIRECTION <output id="angleOutput">R 45°</output></span>
+                <input id="angleInput" type="range" min="-85" max="85" step="1" value="45">
               </label>
 
               <label class="aim-control">
-                <span class="control-title">POWER <output id="powerOutput">62</output></span>
-                <input id="powerInput" type="range" min="18" max="100" step="1" value="62">
+                <span class="control-title">POWER <output id="powerOutput">80</output></span>
+                <input id="powerInput" type="range" min="18" max="200" step="1" value="80">
               </label>
 
               <div class="fire-controls">
@@ -266,6 +266,26 @@
                 <div><dt>Move step</dt><dd id="telemetryMove">2.8</dd></div>
                 <div><dt>Hits needed</dt><dd id="telemetryHits">3</dd></div>
               </dl>
+              </div>
+            </section>
+
+
+            <section class="panel compact-panel armoury-panel collapsible-panel collapsed" data-panel="armoury">
+              <div class="panel-heading compact">
+                <div><p class="eyebrow">SUPPLY</p><h3>Armoury <span id="localCreditsLabel" class="inline-credits">50 CR</span></h3></div>
+                <button class="collapse-button" type="button" aria-label="Expand armoury" title="Expand panel">+</button>
+              </div>
+              <div class="panel-body">
+                <p id="weaponStatus" class="weapon-status">Standard shell armed</p>
+                <div class="armoury-grid">
+                  <button id="standardWeaponButton" class="armoury-button active" type="button"><strong>Standard</strong><span>No cost</span></button>
+                  <button id="parachuteWeaponButton" class="armoury-button" type="button"><strong>Parachute bomb</strong><span>10 CR · owned <b id="parachuteCount">0</b></span></button>
+                  <button id="berthaWeaponButton" class="armoury-button" type="button"><strong>Big Bertha</strong><span>10 CR · owned <b id="berthaCount">0</b></span></button>
+                  <button id="teleportWeaponButton" class="armoury-button" type="button"><strong>Teleport</strong><span>10 CR · owned <b id="teleportCount">0</b></span></button>
+                  <button id="engineUpgradeButton" class="armoury-button" type="button"><strong>Bigger engine</strong><span id="engineStatus">10 CR · owned 0</span></button>
+                  <button id="repairKitButton" class="armoury-button" type="button"><strong>Repair kit</strong><span>20 CR · owned <b id="repairCount">0</b></span></button>
+                </div>
+                <small class="armoury-note">Special weapons give the opponent a double turn. Press Space again during a parachute shot to deploy it.</small>
               </div>
             </section>
 
@@ -336,6 +356,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

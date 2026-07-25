@@ -8,6 +8,10 @@
   const NETWORK_CHUNK_SIZE = 4000;
   const NETWORK_TRANSFER_TTL = 30000;
   const ACTIVE_RENDER_FPS = 30;
+  const MAX_POWER = 200;
+  const STANDARD_POWER = 80;
+  const OFFSCREEN_RETURN_SECONDS = 5;
+  const WEAPON_COSTS = { parachute: 10, bigBertha: 10, teleport: 10, engine: 10, repair: 20 };
   const ACTIVE_FRAME_INTERVAL = 1000 / ACTIVE_RENDER_FPS;
   const TEAM_NAMES = { blue: "Blue", red: "Red" };
   const OTHER_TEAM = { blue: "red", red: "blue" };
@@ -68,6 +72,8 @@
     redRoleLabel: $("redRoleLabel"),
     blueHits: $("blueHits"),
     redHits: $("redHits"),
+    blueCredits: $("blueCredits"),
+    redCredits: $("redCredits"),
     turnLabel: $("turnLabel"),
     windLabel: $("windLabel"),
     blueScore: $("blueScore"),
@@ -96,6 +102,19 @@
     powerOutput: $("powerOutput"),
     fireButton: $("fireButton"),
     doubleStrikeButton: $("doubleStrikeButton"),
+    localCreditsLabel: $("localCreditsLabel"),
+    weaponStatus: $("weaponStatus"),
+    standardWeaponButton: $("standardWeaponButton"),
+    parachuteWeaponButton: $("parachuteWeaponButton"),
+    berthaWeaponButton: $("berthaWeaponButton"),
+    teleportWeaponButton: $("teleportWeaponButton"),
+    engineUpgradeButton: $("engineUpgradeButton"),
+    repairKitButton: $("repairKitButton"),
+    parachuteCount: $("parachuteCount"),
+    berthaCount: $("berthaCount"),
+    teleportCount: $("teleportCount"),
+    engineStatus: $("engineStatus"),
+    repairCount: $("repairCount"),
     telemetryWind: $("telemetryWind"),
     telemetryGravity: $("telemetryGravity"),
     telemetryMove: $("telemetryMove"),
@@ -155,6 +174,9 @@
   let visibilityWarningActive = false;
   let winnerModalDismissed = false;
   let doubleStrikeSelected = false;
+  let selectedWeapon = "standard";
+  let pendingArmAfterPurchase = null;
+  let teleportMode = false;
   let currentScreen = "home";
   const aimDrag = { active: false, pointerId: null };
   const inspectionCamera = {
@@ -518,14 +540,24 @@
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
-  function worldAngleForTeam(team, elevation) {
-    const safeElevation = clamp(Number(elevation) || 45, 5, 85);
-    return team === "red" ? 180 - safeElevation : safeElevation;
+  // The slider is an absolute left/right control. Negative aims left, positive
+  // aims right, and zero points straight up.
+  function worldAngleForTeam(_team, aim) {
+    return 90 - clamp(Number(aim) || 0, -85, 85);
   }
 
-  function elevationFromWorldAngle(team, angle) {
-    const value = Number(angle) || 45;
-    return clamp(team === "red" && value > 90 ? 180 - value : value, 5, 85);
+  function normaliseAimAngle(team, angle, version = 10) {
+    const value = Number(angle);
+    if (!Number.isFinite(value)) return team === "red" ? -45 : 45;
+    if (version < 10 && value >= 0 && value <= 180) return team === "red" ? -Math.abs(value) : Math.abs(value);
+    return clamp(value, -85, 85);
+  }
+
+  function formatAimAngle(value) {
+    const aim = Math.round(Number(value) || 0);
+    const elevation = 90 - Math.abs(aim);
+    if (aim === 0) return "90° UP";
+    return `${aim < 0 ? "L" : "R"} ${elevation}°`;
   }
 
   function locationSettings(location, existing = {}) {
@@ -771,6 +803,11 @@
         localInputPending = false;
         animation = null;
         if (data.movement) startMovementAnimation(data.movement.team, data.movement.fromX, data.movement.toX, false);
+        if (pendingArmAfterPurchase) {
+          const arm = pendingArmAfterPurchase;
+          pendingArmAfterPurchase = null;
+          if ((gameState.inventory?.[localTeam()]?.[arm] || 0) > 0) armWeapon(arm);
+        }
         updateGameUI(true);
         if (data.message) {
           addEvent(data.message);
@@ -782,6 +819,12 @@
         if (role !== "guest") return;
         localInputPending = false;
         beginShotAnimation(data.packet);
+        break;
+
+      case "shot-replace":
+        if (role !== "guest") return;
+        replaceShotAnimation(data.packet);
+        addEvent(`${TEAM_NAMES[data.packet.shooter]} deployed the parachute.`);
         break;
 
       case "round-start":
@@ -918,7 +961,7 @@
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
     const state = {
-      version: 8,
+      version: 10,
       seed,
       settings,
       terrain: terrain.map(value => round(value, 3)),
@@ -927,15 +970,22 @@
       baseCeiling: ceiling ? ceiling.map(value => round(value, 3)) : null,
       spawnPositions: deepClone(spawnPositions),
       tanks: {
-        blue: { x: round(spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: 62 },
-        red: { x: round(spawnPositions.red, 3), hits: 0, alive: true, angle: 45, power: 62 }
+        blue: { x: round(spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: STANDARD_POWER },
+        red: { x: round(spawnPositions.red, 3), hits: 0, alive: true, angle: -45, power: STANDARD_POWER }
       },
+      credits: { blue: 50, red: 50 },
+      inventory: {
+        blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 },
+        red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }
+      },
+      upgrades: { blue: { engine: false }, red: { engine: false } },
       scores,
       round: roundNumber,
       turn: "blue",
       turnsRemaining: 1,
       bonusFromDouble: false,
       movedThisTurn: false,
+      movesUsedThisTurn: 0,
       wind: randomWind(settings),
       winner: null,
       shotNumber: 0
@@ -1172,7 +1222,10 @@
     animation = null;
     movementAnimation = null;
     doubleStrikeSelected = false;
+    selectedWeapon = "standard";
+    teleportMode = false;
     updateDoubleStrikeButton();
+    updateArmouryUI();
     resetInspectionView(false);
     winnerModalDismissed = false;
     localInputPending = false;
@@ -1199,9 +1252,19 @@
   }
 
   function normalizeGameState(state) {
+    const incomingVersion = Number.isFinite(state.version) ? state.version : 8;
     if (!state.scores) state.scores = { blue: 0, red: 0 };
+    if (!state.credits) state.credits = { blue: 50, red: 50 };
+    if (!state.inventory) state.inventory = { blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }, red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 } };
+    if (!state.upgrades) state.upgrades = { blue: { engine: false }, red: { engine: false } };
+    for (const team of ["blue", "red"]) {
+      state.credits[team] = Math.max(0, Math.floor(Number(state.credits[team]) || 0));
+      state.inventory[team] = { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0, ...(state.inventory[team] || {}) };
+      state.upgrades[team] = { engine: false, ...(state.upgrades[team] || {}) };
+    }
     if (!Number.isFinite(state.round)) state.round = 1;
     if (!Number.isFinite(state.turnsRemaining)) state.turnsRemaining = 1;
+    if (!Number.isFinite(state.movesUsedThisTurn)) state.movesUsedThisTurn = state.movedThisTurn ? 1 : 0;
     if (typeof state.bonusFromDouble !== "boolean") state.bonusFromDouble = false;
     if (!state.spawnPositions) {
       state.spawnPositions = { blue: state.tanks.blue.x, red: state.tanks.red.x };
@@ -1213,9 +1276,11 @@
     }
     if (!state.baseCeiling && state.ceiling) state.baseCeiling = state.ceiling.slice();
     for (const team of ["blue", "red"]) {
-      state.tanks[team].angle = elevationFromWorldAngle(team, state.tanks[team].angle);
+      state.tanks[team].angle = normaliseAimAngle(team, state.tanks[team].angle, incomingVersion);
+      state.tanks[team].power = clamp(Number(state.tanks[team].power) || STANDARD_POWER, 18, MAX_POWER);
     }
-    state.version = 9;
+    state.movedThisTurn = state.movesUsedThisTurn >= maxMovesForTeam(state.turn, state);
+    state.version = 10;
     return state;
   }
 
@@ -1249,6 +1314,9 @@
     dom.blueScore.textContent = String(gameState.scores.blue);
     dom.redScore.textContent = String(gameState.scores.red);
     dom.roundNumber.textContent = String(gameState.round);
+    dom.blueCredits.textContent = `${gameState.credits.blue} CR`;
+    dom.redCredits.textContent = `${gameState.credits.red} CR`;
+    updateArmouryUI();
     renderHitPips(dom.blueHits, tanks.blue.hits, settings.hitsToDestroy);
     renderHitPips(dom.redHits, tanks.red.hits, settings.hitsToDestroy);
 
@@ -1256,7 +1324,7 @@
       const tank = tanks[localTeam()];
       dom.angleInput.value = tank.angle;
       dom.powerInput.value = tank.power;
-      dom.angleOutput.textContent = `${Math.round(tank.angle)}°`;
+      dom.angleOutput.textContent = formatAimAngle(tank.angle);
       dom.powerOutput.textContent = Math.round(tank.power);
     }
 
@@ -1296,28 +1364,218 @@
   }
 
   function updateGameControls() {
+    if (!gameState) return;
     const enabled = canLocalAct();
-    const moveAvailable = enabled && !gameState.movedThisTurn;
+    const deployReady = canDeployParachute();
+    const movesRemaining = Math.max(0, maxMovesForTeam(localTeam()) - gameState.movesUsedThisTurn);
+    const moveAvailable = enabled && movesRemaining > 0;
     dom.moveLeftButton.disabled = !moveAvailable;
     dom.moveRightButton.disabled = !moveAvailable;
     dom.angleInput.disabled = !enabled;
     dom.powerInput.disabled = !enabled;
-    dom.fireButton.disabled = !enabled;
-    dom.doubleStrikeButton.disabled = !enabled;
+    dom.fireButton.disabled = !(enabled || deployReady);
+    dom.fireButton.classList.toggle("deploy-ready", deployReady);
+    dom.fireButton.querySelector("span").textContent = deployReady ? "DEPLOY" : selectedWeapon === "bigBertha" ? "FIRE BERTHA" : selectedWeapon === "parachute" ? "FIRE PARACHUTE" : selectedWeapon === "teleport" ? "PLACE" : "FIRE";
+    dom.fireButton.querySelector("small").textContent = deployReady ? "Spacebar again" : "Spacebar";
+    dom.doubleStrikeButton.disabled = !enabled || selectedWeapon !== "standard";
     dom.locatorButton.disabled = Boolean(animation || movementAnimation);
     const roundControlBusy = Boolean(animation || movementAnimation || pendingActionRequest || localActionRequest);
     dom.restartRoundButton.disabled = roundControlBusy;
     dom.regenerateMapButton.disabled = roundControlBusy;
     dom.changeWorldButton.disabled = roundControlBusy || dom.gameLocationSelect.value === gameState.settings.location;
 
-    if (!gameState) return;
     if (gameState.winner) dom.moveStatus.textContent = "Battle complete";
+    else if (deployReady) dom.moveStatus.textContent = "Press Space to deploy parachute";
     else if (animation) dom.moveStatus.textContent = "Projectile in flight";
     else if (movementAnimation) dom.moveStatus.textContent = "Tank moving";
     else if (localInputPending) dom.moveStatus.textContent = "Waiting for host";
     else if (gameState.turn !== localTeam()) dom.moveStatus.textContent = "Opponent's turn";
-    else if (gameState.movedThisTurn) dom.moveStatus.textContent = "Movement used";
-    else dom.moveStatus.textContent = "Movement available";
+    else if (movesRemaining <= 0) dom.moveStatus.textContent = "Movement used";
+    else dom.moveStatus.textContent = `${movesRemaining} move${movesRemaining === 1 ? "" : "s"} available`;
+    updateArmouryUI();
+  }
+
+  function updateArmouryUI() {
+    if (!gameState || !dom.localCreditsLabel) return;
+    const team = localTeam();
+    const credits = gameState.credits?.[team] || 0;
+    const inventory = gameState.inventory?.[team] || { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 };
+    dom.localCreditsLabel.textContent = `${credits} CR`;
+    dom.parachuteCount.textContent = String(inventory.parachute || 0);
+    dom.berthaCount.textContent = String(inventory.bigBertha || 0);
+    dom.teleportCount.textContent = String(inventory.teleport || 0);
+    dom.repairCount.textContent = String(inventory.repair || 0);
+    dom.engineStatus.textContent = gameState.upgrades?.[team]?.engine ? "INSTALLED · three moves" : `${inventory.engine || 0 ? "INSTALL" : "10 CR"} · owned ${inventory.engine || 0}`;
+
+    const labels = {
+      standard: "Standard shell armed",
+      parachute: "Parachute bomb armed — Space launches, Space again deploys",
+      bigBertha: "Big Bertha armed — enormous terrain blast",
+      teleport: "Teleport armed — click or touch a destination"
+    };
+    dom.weaponStatus.textContent = labels[selectedWeapon] || labels.standard;
+    const buttons = {
+      standard: dom.standardWeaponButton,
+      parachute: dom.parachuteWeaponButton,
+      bigBertha: dom.berthaWeaponButton,
+      teleport: dom.teleportWeaponButton
+    };
+    Object.entries(buttons).forEach(([weapon, button]) => button.classList.toggle("active", selectedWeapon === weapon));
+    const busy = Boolean(animation || movementAnimation || pendingActionRequest || localActionRequest || gameState.winner);
+    dom.standardWeaponButton.disabled = busy;
+    dom.parachuteWeaponButton.disabled = busy || ((inventory.parachute || 0) < 1 && credits < WEAPON_COSTS.parachute);
+    dom.berthaWeaponButton.disabled = busy || ((inventory.bigBertha || 0) < 1 && credits < WEAPON_COSTS.bigBertha);
+    dom.teleportWeaponButton.disabled = busy || ((inventory.teleport || 0) < 1 && credits < WEAPON_COSTS.teleport);
+    dom.engineUpgradeButton.disabled = busy || gameState.upgrades?.[team]?.engine || ((inventory.engine || 0) < 1 && credits < WEAPON_COSTS.engine);
+    dom.repairKitButton.disabled = busy || ((inventory.repair || 0) < 1 && credits < WEAPON_COSTS.repair);
+  }
+
+  function armWeapon(weapon) {
+    if (!gameState) return;
+    const safe = ["standard", "parachute", "bigBertha", "teleport"].includes(weapon) ? weapon : "standard";
+    selectedWeapon = safe;
+    teleportMode = safe === "teleport";
+    dom.canvasFrame.classList.toggle("teleport-active", teleportMode);
+    if (safe !== "standard") {
+      doubleStrikeSelected = false;
+      updateDoubleStrikeButton();
+    }
+    updateArmouryUI();
+    updateGameControls();
+    requestRender();
+  }
+
+  function requestArmouryItem(item) {
+    if (!gameState || gameState.winner || animation || movementAnimation) return;
+    const team = localTeam();
+    if (["parachute", "bigBertha", "teleport"].includes(item) && (gameState.inventory[team][item] || 0) > 0) {
+      armWeapon(item);
+      playUiSound();
+      return;
+    }
+    if (["engine", "repair"].includes(item) && (gameState.inventory[team][item] || 0) > 0) {
+      if (!canLocalAct()) {
+        dom.weaponStatus.textContent = `${item === "engine" ? "Bigger engine" : "Repair kit"} owned — activate it on your turn`;
+        return;
+      }
+      if (role === "guest") {
+        localInputPending = true;
+        sendNetwork({ type: "input", action: "use-item", item });
+        updateGameControls();
+      } else {
+        authoritativeUseUtility(team, item);
+      }
+      return;
+    }
+    pendingArmAfterPurchase = ["parachute", "bigBertha", "teleport"].includes(item) ? item : null;
+    if (role === "guest") {
+      sendNetwork({ type: "input", action: "purchase", item });
+      dom.weaponStatus.textContent = "Purchase request sent…";
+    } else {
+      authoritativePurchase(team, item);
+    }
+  }
+
+  function authoritativePurchase(team, item, announce = true) {
+    if (!gameState || gameState.winner || animation || movementAnimation) return false;
+    const cost = WEAPON_COSTS[item];
+    if (!Number.isFinite(cost)) return false;
+    if (item === "engine" && gameState.upgrades[team].engine) return false;
+    if (gameState.credits[team] < cost) {
+      if (announce) rejectGuestInput(`${TEAM_NAMES[team]} does not have enough credits.`);
+      return false;
+    }
+    gameState.credits[team] -= cost;
+    gameState.inventory[team][item] += 1;
+    const name = item === "engine" ? "bigger engine" : item === "repair" ? "repair kit" : weaponLabel(item);
+    const message = `${TEAM_NAMES[team]} bought ${name} for ${cost} credits.`;
+    if (team === localTeam() && pendingArmAfterPurchase && ["parachute", "bigBertha", "teleport"].includes(item)) {
+      const arm = pendingArmAfterPurchase;
+      pendingArmAfterPurchase = null;
+      armWeapon(arm);
+    }
+    if (announce) addEvent(message);
+    broadcastState(message);
+    updateGameUI(true);
+    playUiSound();
+    return true;
+  }
+
+  function authoritativeUseUtility(team, item) {
+    if (!gameState || gameState.winner || animation || movementAnimation || gameState.turn !== team) return false;
+    if (!["engine", "repair"].includes(item) || (gameState.inventory?.[team]?.[item] || 0) < 1) return false;
+    if (item === "engine" && gameState.upgrades[team].engine) return false;
+    if (item === "repair" && gameState.tanks[team].hits < 1) {
+      rejectGuestInput(`${TEAM_NAMES[team]}'s tank does not need repair.`);
+      return false;
+    }
+    gameState.inventory[team][item] -= 1;
+    let message;
+    if (item === "engine") {
+      gameState.upgrades[team].engine = true;
+      message = `${TEAM_NAMES[team]} installed a bigger engine and now has three moves per turn.`;
+    } else {
+      gameState.tanks[team].hits = Math.max(0, gameState.tanks[team].hits - 1);
+      message = `${TEAM_NAMES[team]} used a repair kit and removed one hit.`;
+    }
+    gameState.movesUsedThisTurn = 0;
+    gameState.movedThisTurn = false;
+    advanceTurnAfterShot(gameState, team, true);
+    gameState.wind = randomWind(gameState.settings);
+    localInputPending = false;
+    message += ` ${TEAM_NAMES[gameState.turn]} receives a double turn.`;
+    addEvent(message);
+    broadcastState(message);
+    updateGameUI(true);
+    playRoundSound();
+    return true;
+  }
+
+  function requestTeleport(worldX) {
+    if (!gameState || selectedWeapon !== "teleport" || !canLocalAct()) return;
+    const team = localTeam();
+    if ((gameState.inventory[team].teleport || 0) < 1) return;
+    teleportMode = false;
+    selectedWeapon = "standard";
+    dom.canvasFrame.classList.remove("teleport-active");
+    if (role === "guest") {
+      localInputPending = true;
+      sendNetwork({ type: "input", action: "teleport", x: worldX });
+      updateGameControls();
+    } else {
+      authoritativeTeleport(team, worldX);
+    }
+  }
+
+  function authoritativeTeleport(team, worldX) {
+    if (!gameState || gameState.winner || animation || movementAnimation || gameState.turn !== team) return false;
+    if ((gameState.inventory?.[team]?.teleport || 0) < 1) {
+      rejectGuestInput(`${TEAM_NAMES[team]} does not own a teleport.`);
+      return false;
+    }
+    const minX = gameState.settings.worldWidth * 0.035;
+    const maxX = gameState.settings.worldWidth * 0.965;
+    let destination = clamp(Number(worldX) || gameState.tanks[team].x, minX, maxX);
+    const otherX = gameState.tanks[OTHER_TEAM[team]].x;
+    const separation = tankWorldWidth() * 1.35;
+    if (Math.abs(destination - otherX) < separation) destination = clamp(otherX + (destination < otherX ? -separation : separation), minX, maxX);
+    gameState.inventory[team].teleport -= 1;
+    gameState.tanks[team].x = round(destination, 3);
+    gameState.movesUsedThisTurn = 0;
+    gameState.movedThisTurn = false;
+    advanceTurnAfterShot(gameState, team, true);
+    gameState.wind = randomWind(gameState.settings);
+    localInputPending = false;
+    const message = `${TEAM_NAMES[team]} teleported across the battlefield. ${TEAM_NAMES[gameState.turn]} receives a double turn.`;
+    addEvent(message);
+    broadcastState(message);
+    updateGameUI(true);
+    playRoundSound();
+    return true;
+  }
+
+  function maxMovesForTeam(team, state = gameState) {
+    return state?.upgrades?.[team]?.engine ? 3 : 1;
   }
 
   function moveStep() {
@@ -1327,7 +1585,7 @@
   }
 
   function requestMove(direction) {
-    if (!canLocalAct() || gameState.movedThisTurn) return;
+    if (!canLocalAct() || gameState.movesUsedThisTurn >= maxMovesForTeam(localTeam())) return;
     const team = localTeam();
     if (role === "guest") {
       localInputPending = true;
@@ -1339,7 +1597,7 @@
   }
 
   function authoritativeMove(team, direction) {
-    if (!gameState || animation || gameState.winner || gameState.turn !== team || gameState.movedThisTurn) return false;
+    if (!gameState || animation || gameState.winner || gameState.turn !== team || gameState.movesUsedThisTurn >= maxMovesForTeam(team)) return false;
     const tank = gameState.tanks[team];
     const other = gameState.tanks[OTHER_TEAM[team]];
     const step = moveStep() * Math.sign(direction);
@@ -1356,9 +1614,11 @@
     // Tanks may climb steep banks. Their body rotates to match the local surface.
     const fromX = tank.x;
     tank.x = round(candidate, 3);
-    gameState.movedThisTurn = true;
+    gameState.movesUsedThisTurn += 1;
+    gameState.movedThisTurn = gameState.movesUsedThisTurn >= maxMovesForTeam(team);
     localInputPending = false;
-    const message = `${TEAM_NAMES[team]} moved ${direction < 0 ? "left" : "right"}.`;
+    const remaining = Math.max(0, maxMovesForTeam(team) - gameState.movesUsedThisTurn);
+    const message = `${TEAM_NAMES[team]} moved ${direction < 0 ? "left" : "right"}${remaining ? ` (${remaining} move${remaining === 1 ? "" : "s"} left)` : ""}.`;
     startMovementAnimation(team, fromX, tank.x, true);
     playMoveSound();
     addEvent(message);
@@ -1374,25 +1634,88 @@
     addEvent(message);
   }
 
+  function canDeployParachute() {
+    return Boolean(
+      animation &&
+      animation.phase === "travel" &&
+      animation.packet?.weapon === "parachute" &&
+      !animation.packet.parachuteDeployed &&
+      !animation.packet.deployRequested &&
+      animation.packet.shooter === localTeam()
+    );
+  }
+
   function requestFire() {
+    if (canDeployParachute()) {
+      requestParachuteDeploy();
+      return;
+    }
     if (!canLocalAct()) return;
+    if (selectedWeapon === "teleport") {
+      teleportMode = true;
+      dom.canvasFrame.classList.add("teleport-active");
+      dom.weaponStatus.textContent = "Teleport armed — click or touch a destination on the battlefield";
+      updateGameControls();
+      playUiSound();
+      return;
+    }
+
     const angle = Number(dom.angleInput.value);
     const power = Number(dom.powerInput.value);
     const team = localTeam();
-    const doubleStrike = doubleStrikeSelected;
+    const weapon = selectedWeapon;
+    if (weapon !== "standard" && (gameState.inventory?.[team]?.[weapon] || 0) < 1) {
+      addEvent(`No ${weaponLabel(weapon)} is available.`, "error");
+      selectedWeapon = "standard";
+      updateArmouryUI();
+      return;
+    }
+    const doubleStrike = weapon === "standard" && doubleStrikeSelected;
     doubleStrikeSelected = false;
+    selectedWeapon = "standard";
+    teleportMode = false;
+    dom.canvasFrame.classList.remove("teleport-active");
     updateDoubleStrikeButton();
+    updateArmouryUI();
 
     if (role === "guest") {
       localInputPending = true;
-      sendNetwork({ type: "input", action: "fire", angle, power, doubleStrike });
+      sendNetwork({ type: "input", action: "fire", angle, power, doubleStrike, weapon });
       updateGameControls();
     } else {
-      authoritativeFire(team, angle, power, doubleStrike);
+      authoritativeFire(team, angle, power, doubleStrike, weapon);
     }
   }
 
+  function requestParachuteDeploy() {
+    if (!canDeployParachute()) return;
+    const packet = animation.packet;
+    const elapsed = performance.now() - animation.start;
+    const progress = clamp(elapsed / Math.max(1, animation.travelDuration), 0.03, 0.97);
+    if (role === "guest") {
+      sendNetwork({ type: "input", action: "deploy-parachute", progress });
+      packet.deployRequested = true;
+      dom.moveStatus.textContent = "Deploy request sent";
+    } else {
+      authoritativeDeployParachute(packet.shooter, progress);
+    }
+    playUiSound();
+  }
+
   function handleGuestInput(data) {
+    if (!gameState) return;
+    if (data.action === "purchase") {
+      authoritativePurchase("red", String(data.item || ""));
+      return;
+    }
+    if (data.action === "deploy-parachute") {
+      authoritativeDeployParachute("red", Number(data.progress));
+      return;
+    }
+    if (data.action === "use-item") {
+      authoritativeUseUtility("red", String(data.item || ""));
+      return;
+    }
     if (!gameState || gameState.turn !== "red" || animation || movementAnimation || gameState.winner) {
       rejectGuestInput("Input ignored because it is not Red's active turn.");
       return;
@@ -1400,24 +1723,42 @@
     if (data.action === "move") {
       authoritativeMove("red", Number(data.direction));
     } else if (data.action === "fire") {
-      authoritativeFire("red", Number(data.angle), Number(data.power), Boolean(data.doubleStrike));
+      authoritativeFire("red", Number(data.angle), Number(data.power), Boolean(data.doubleStrike), String(data.weapon || "standard"));
+    } else if (data.action === "teleport") {
+      authoritativeTeleport("red", Number(data.x));
     }
   }
 
-  function authoritativeFire(team, angle, power, doubleStrike = false) {
+  function weaponLabel(weapon) {
+    return ({ parachute: "parachute bomb", bigBertha: "Big Bertha", teleport: "teleport" })[weapon] || "standard shell";
+  }
+
+  function authoritativeFire(team, angle, power, doubleStrike = false, weapon = "standard") {
     if (!gameState || animation || movementAnimation || gameState.winner || gameState.turn !== team) return;
-    const safeAngle = clamp(Number.isFinite(angle) ? angle : 45, 5, 85);
-    const safePower = clamp(Number.isFinite(power) ? power : 60, 18, 100);
+    const safeWeapon = ["standard", "parachute", "bigBertha"].includes(weapon) ? weapon : "standard";
+    if (safeWeapon !== "standard" && (gameState.inventory?.[team]?.[safeWeapon] || 0) < 1) {
+      rejectGuestInput(`${TEAM_NAMES[team]} does not own that weapon.`);
+      return;
+    }
+    const safeAngle = clamp(Number.isFinite(angle) ? angle : (team === "red" ? -45 : 45), -85, 85);
+    const safePower = clamp(Number.isFinite(power) ? power : STANDARD_POWER, 18, MAX_POWER);
     gameState.tanks[team].angle = round(safeAngle, 1);
     gameState.tanks[team].power = round(safePower, 1);
 
-    const result = simulateShot(gameState, team, safeAngle, safePower, true);
-    const resultingState = deepClone(gameState);
+    const packet = createShotPacket(gameState, team, safeAngle, safePower, doubleStrike, safeWeapon, null);
+    if (role === "host" && connection && connection.open) sendNetwork({ type: "shot", packet });
+    beginShotAnimation(packet);
+  }
+
+  function createShotPacket(baseState, team, angle, power, doubleStrike, weapon, parachuteDeployTime) {
+    const result = simulateShot(baseState, team, angle, power, true, { weapon, parachuteDeployTime });
+    const resultingState = deepClone(baseState);
     resultingState.shotNumber += 1;
-    const blastRadius = shotBlastRadius(resultingState, doubleStrike);
+    if (weapon !== "standard") resultingState.inventory[team][weapon] = Math.max(0, resultingState.inventory[team][weapon] - 1);
+    const blastRadius = shotBlastRadius(resultingState, doubleStrike, weapon);
 
     const hitTeams = result.impact && result.impact.type !== "out"
-      ? blastHitTeams(gameState, result.impact, blastRadius)
+      ? blastHitTeams(baseState, result.impact, blastRadius)
       : [];
     if (result.hitTeam && !hitTeams.includes(result.hitTeam)) hitTeams.push(result.hitTeam);
 
@@ -1428,10 +1769,9 @@
 
     for (const hitTeam of hitTeams) {
       resultingState.tanks[hitTeam].hits += 1;
-      if (resultingState.tanks[hitTeam].hits >= resultingState.settings.hitsToDestroy) {
-        resultingState.tanks[hitTeam].alive = false;
-      }
+      if (resultingState.tanks[hitTeam].hits >= resultingState.settings.hitsToDestroy) resultingState.tanks[hitTeam].alive = false;
     }
+    if (hitTeams.includes(OTHER_TEAM[team])) resultingState.credits[team] += 3;
 
     const aliveTeams = ["blue", "red"].filter(candidate => resultingState.tanks[candidate].alive);
     if (aliveTeams.length === 1) {
@@ -1442,17 +1782,25 @@
       resultingState.scores[resultingState.winner] += 1;
     }
 
+    const doubleTurnPenalty = doubleStrike || weapon !== "standard";
     if (!resultingState.winner) {
-      advanceTurnAfterShot(resultingState, team, doubleStrike);
+      advanceTurnAfterShot(resultingState, team, doubleTurnPenalty);
+      resultingState.movesUsedThisTurn = 0;
       resultingState.movedThisTurn = false;
       resultingState.wind = randomWind(resultingState.settings);
     }
 
-    const packet = {
+    return {
       shooter: team,
-      angle: round(safeAngle, 1),
-      power: round(safePower, 1),
+      angle: round(angle, 1),
+      power: round(power, 1),
+      weapon,
       doubleStrike,
+      doubleTurnPenalty,
+      parachuteDeployed: Number.isFinite(parachuteDeployTime),
+      parachuteDeployTime: Number.isFinite(parachuteDeployTime) ? round(parachuteDeployTime, 3) : null,
+      parachuteDeployIndex: result.parachuteDeployIndex,
+      flightTime: round(result.flightTime, 3),
       blastRadius: round(blastRadius, 3),
       trajectory: result.trajectory,
       impact: result.impact,
@@ -1460,30 +1808,54 @@
       hitTeams,
       resultingState: compactStateMetadata(resultingState)
     };
-
-    if (role === "host" && connection && connection.open) sendNetwork({ type: "shot", packet });
-    beginShotAnimation(packet);
   }
 
-  function advanceTurnAfterShot(state, shooter, doubleStrike) {
+  function authoritativeDeployParachute(team, progress) {
+    if (!animation || animation.phase !== "travel") return;
+    const oldPacket = animation.packet;
+    if (oldPacket.shooter !== team || oldPacket.weapon !== "parachute" || oldPacket.parachuteDeployed) return;
+    const safeProgress = clamp(Number(progress) || 0.25, 0.03, 0.97);
+    const deployTime = clamp(oldPacket.flightTime * safeProgress, 0.12, Math.max(0.14, oldPacket.flightTime - 0.04));
+    const packet = createShotPacket(gameState, team, oldPacket.angle, oldPacket.power, false, "parachute", deployTime);
+    if (role === "host" && connection && connection.open) sendNetwork({ type: "shot-replace", packet, progress: safeProgress });
+    replaceShotAnimation(packet);
+    addEvent(`${TEAM_NAMES[team]} deployed the parachute.`);
+  }
+
+  function replaceShotAnimation(packet) {
+    const deployIndex = Math.max(1, Number(packet.parachuteDeployIndex) || 1);
+    const progress = clamp(deployIndex / Math.max(1, packet.trajectory.length - 1), 0, 0.96);
+    const travelDuration = clamp(packet.trajectory.length * 7.5, 700, 4200);
+    animation = {
+      packet,
+      start: performance.now() - progress * travelDuration,
+      travelDuration,
+      explosionDuration: packet.impact && packet.impact.type !== "out" ? 620 : 180,
+      phase: "travel"
+    };
+    updateGameControls();
+    requestRender();
+  }
+
+  function advanceTurnAfterShot(state, shooter, doubleTurnPenalty) {
     const opponent = OTHER_TEAM[shooter];
-    if (doubleStrike && state.bonusFromDouble) {
+    if (doubleTurnPenalty && state.bonusFromDouble) {
       state.turn = opponent;
       state.turnsRemaining = 1;
       state.bonusFromDouble = false;
-      return;
-    }
-    if (!doubleStrike && state.turnsRemaining > 1) {
+    } else if (!doubleTurnPenalty && state.turnsRemaining > 1) {
       state.turn = shooter;
       state.turnsRemaining -= 1;
-      return;
+    } else {
+      state.turn = opponent;
+      state.turnsRemaining = doubleTurnPenalty ? 2 : 1;
+      state.bonusFromDouble = doubleTurnPenalty;
     }
-    state.turn = opponent;
-    state.turnsRemaining = doubleStrike ? 2 : 1;
-    state.bonusFromDouble = doubleStrike;
+    state.credits[state.turn] += 1;
   }
 
-  function shotBlastRadius(state, doubleStrike = false) {
+  function shotBlastRadius(state, doubleStrike = false, weapon = "standard") {
+    if (weapon === "bigBertha") return craterRadius(state) * 20;
     return craterRadius(state) * (doubleStrike ? 2 : 1);
   }
 
@@ -1499,7 +1871,7 @@
     return hitTeams;
   }
 
-  function simulateShot(state, team, angle, power, recordTrajectory) {
+  function simulateShot(state, team, angle, power, recordTrajectory, options = {}) {
     const origin = muzzlePosition(state, team, angle);
     const radians = worldAngleForTeam(team, angle) * Math.PI / 180;
     const speed = power * 0.60;
@@ -1508,20 +1880,46 @@
     let vx = Math.cos(radians) * speed;
     let vy = Math.sin(radians) * speed;
     const dt = 0.035;
+    let elapsed = 0;
+    let aboveTopFor = 0;
+    let parachuteDeployed = false;
+    let parachuteDeployIndex = null;
+    const deployTime = Number.isFinite(options.parachuteDeployTime) ? options.parachuteDeployTime : null;
     const trajectory = [{ x: round(x), y: round(y) }];
-    const maxSteps = 2600;
+    const maxSteps = 9000;
 
     for (let step = 0; step < maxSteps; step += 1) {
-      vx += state.wind * 0.2 * dt;
-      vy -= state.settings.gravity * dt;
+      elapsed += dt;
+      if (!parachuteDeployed && options.weapon === "parachute" && deployTime !== null && elapsed >= deployTime) {
+        parachuteDeployed = true;
+        parachuteDeployIndex = trajectory.length;
+      }
+
+      if (parachuteDeployed) {
+        const targetVx = state.wind * 0.55;
+        const terminalDown = -(2.8 + Math.sqrt(Math.max(0.4, state.settings.gravity)) * 0.42);
+        vx += (targetVx - vx) * Math.min(1, dt * 2.8);
+        vy += (terminalDown - vy) * Math.min(1, dt * 4.2);
+      } else {
+        vx += state.wind * 0.2 * dt;
+        vy -= state.settings.gravity * dt;
+      }
       x += vx * dt;
       y += vy * dt;
 
       if (recordTrajectory && step % 2 === 0) trajectory.push({ x: round(x), y: round(y) });
 
-      if (x < 0 || x > state.settings.worldWidth || y < -5 || y > WORLD_HEIGHT + 5) {
+      // Horizontal exits are always lost. Above the visible sky is not a ceiling:
+      // the shell receives five simulated seconds to fall back into view.
+      if (x < 0 || x > state.settings.worldWidth || y < -8) {
         if (recordTrajectory) trajectory.push({ x: round(x), y: round(y) });
-        return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null };
+        return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null, flightTime: elapsed, parachuteDeployIndex };
+      }
+      if (!state.ceiling && y > WORLD_HEIGHT + 5) aboveTopFor += dt;
+      else aboveTopFor = 0;
+      if (aboveTopFor >= OFFSCREEN_RETURN_SECONDS) {
+        if (recordTrajectory) trajectory.push({ x: round(x), y: round(y) });
+        return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null, flightTime: elapsed, parachuteDeployIndex };
       }
 
       for (const checkedTeam of ["blue", "red"]) {
@@ -1535,7 +1933,9 @@
           return {
             trajectory,
             impact: { x: round(x), y: round(y), type: "tank" },
-            hitTeam: checkedTeam
+            hitTeam: checkedTeam,
+            flightTime: elapsed,
+            parachuteDeployIndex
           };
         }
       }
@@ -1546,7 +1946,9 @@
         return {
           trajectory,
           impact: { x: round(x), y: round(ground), type: "terrain" },
-          hitTeam: null
+          hitTeam: null,
+          flightTime: elapsed,
+          parachuteDeployIndex
         };
       }
 
@@ -1557,13 +1959,17 @@
           return {
             trajectory,
             impact: { x: round(x), y: round(roof), type: "ceiling" },
-            hitTeam: null
+            hitTeam: null,
+            flightTime: elapsed,
+            parachuteDeployIndex
           };
         }
       }
+
+      if (elapsed > 30) break;
     }
 
-    return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null };
+    return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null, flightTime: elapsed, parachuteDeployIndex };
   }
 
   function muzzlePosition(state, team, angle = state.tanks[team].angle) {
@@ -1677,14 +2083,20 @@
     animation = {
       packet,
       start: performance.now(),
-      travelDuration: clamp(packet.trajectory.length * 7.5, 700, 2650),
-      explosionDuration: packet.impact && packet.impact.type !== "out" ? 520 : 180,
+      travelDuration: clamp(packet.trajectory.length * 7.5, 700, 4200),
+      explosionDuration: packet.impact && packet.impact.type !== "out" ? (packet.weapon === "bigBertha" ? 1100 : 620) : 180,
       phase: "travel"
     };
     playFireSound();
-    addEvent(`${TEAM_NAMES[packet.shooter]} fired${packet.doubleStrike ? " a DOUBLE STRIKE" : ""} at ${packet.angle}° with power ${Math.round(packet.power)}.`);
+    const weaponText = packet.weapon && packet.weapon !== "standard" ? ` ${weaponLabel(packet.weapon)}` : packet.doubleStrike ? " a DOUBLE STRIKE" : "";
+    addEvent(`${TEAM_NAMES[packet.shooter]} fired${weaponText} ${formatAimAngle(packet.angle)} with power ${Math.round(packet.power)}.`);
     updateGameControls();
     requestRender();
+    if (role === "bot" && packet.shooter === "red" && packet.weapon === "parachute" && !packet.parachuteDeployed) {
+      setTimeout(() => {
+        if (animation?.packet === packet && animation.phase === "travel") authoritativeDeployParachute("red", .52);
+      }, 520);
+    }
   }
 
   function finishShotAnimation() {
@@ -1759,7 +2171,7 @@
       botTimer = null;
       if (!gameState || gameState.turn !== "red" || animation || gameState.winner) return;
 
-      if (!gameState.movedThisTurn && Math.random() < 0.42) {
+      if (gameState.movesUsedThisTurn < maxMovesForTeam("red") && Math.random() < 0.42) {
         const direction = gameState.tanks.red.x > gameState.settings.worldWidth * 0.76 ? -1 : (Math.random() < 0.5 ? -1 : 1);
         authoritativeMove("red", direction);
       }
@@ -1770,18 +2182,30 @@
         const aim = calculateBotAim();
         dom.angleInput.value = aim.angle;
         dom.powerInput.value = aim.power;
-        authoritativeFire("red", aim.angle, aim.power, Math.random() < .18);
+        const botWeapon = chooseBotWeapon();
+        authoritativeFire("red", aim.angle, aim.power, botWeapon === "standard" && Math.random() < .18, botWeapon);
       }, 650);
     }, 700);
   }
 
+  function chooseBotWeapon() {
+    if (gameState.credits.red >= 10 && Math.random() < .18) authoritativePurchase("red", Math.random() < .65 ? "bigBertha" : "parachute", false);
+    if (gameState.credits.red >= 10 && !gameState.upgrades.red.engine && !gameState.inventory.red.engine && Math.random() < .08) authoritativePurchase("red", "engine", false);
+    if (gameState.inventory.red.engine > 0 && !gameState.upgrades.red.engine && Math.random() < .45) { authoritativeUseUtility("red", "engine"); return "standard"; }
+    if (gameState.tanks.red.hits > 0 && gameState.credits.red >= 20 && !gameState.inventory.red.repair && Math.random() < .16) authoritativePurchase("red", "repair", false);
+    if (gameState.tanks.red.hits > 0 && gameState.inventory.red.repair > 0 && Math.random() < .45) { authoritativeUseUtility("red", "repair"); return "standard"; }
+    if (gameState.inventory.red.bigBertha > 0 && Math.random() < .35) return "bigBertha";
+    if (gameState.inventory.red.parachute > 0 && Math.random() < .20) return "parachute";
+    return "standard";
+  }
+
   function calculateBotAim() {
-    let best = { angle: 45, power: 60, score: Infinity };
+    let best = { angle: -45, power: STANDARD_POWER, score: Infinity };
     const target = tankCenter(gameState, "blue");
     const shooter = "red";
 
-    for (let angle = 5; angle <= 85; angle += 3) {
-      for (let power = 24; power <= 100; power += 4) {
+    for (let angle = -85; angle <= -5; angle += 4) {
+      for (let power = 28; power <= MAX_POWER; power += 7) {
         const score = quickShotScore(shooter, angle, power, target);
         if (score < best.score) best = { angle, power, score };
         if (score < 0.4) break;
@@ -1789,10 +2213,10 @@
     }
 
     const errorAngle = (Math.random() - 0.5) * 2.2;
-    const errorPower = (Math.random() - 0.5) * 3.6;
+    const errorPower = (Math.random() - 0.5) * 5.5;
     return {
-      angle: round(clamp(best.angle + errorAngle, 5, 85), 1),
-      power: round(clamp(best.power + errorPower, 20, 100), 1)
+      angle: round(clamp(best.angle + errorAngle, -85, 85), 1),
+      power: round(clamp(best.power + errorPower, 20, MAX_POWER), 1)
     };
   }
 
@@ -1815,7 +2239,7 @@
       const distance = Math.hypot(x - target.x, y - target.y);
       bestDistance = Math.min(bestDistance, distance);
       if (distance <= tankCollisionRadius()) return 0;
-      if (x < 0 || x > gameState.settings.worldWidth || y < -4) break;
+      if (x < 0 || x > gameState.settings.worldWidth || y < -8) break;
       if (step > 3 && y <= terrainAt(x, gameState)) break;
       if (gameState.ceiling && step > 3 && y >= ceilingAt(x, gameState)) break;
     }
@@ -2016,14 +2440,18 @@
     state.terrain = state.baseTerrain.slice();
     state.ceiling = state.baseCeiling ? state.baseCeiling.slice() : null;
     state.tanks = {
-      blue: { x: round(state.spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: 62 },
-      red: { x: round(state.spawnPositions.red, 3), hits: 0, alive: true, angle: 45, power: 62 }
+      blue: { x: round(state.spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: STANDARD_POWER },
+      red: { x: round(state.spawnPositions.red, 3), hits: 0, alive: true, angle: -45, power: STANDARD_POWER }
     };
+    state.credits = { blue: 50, red: 50 };
+    state.inventory = { blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }, red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 } };
+    state.upgrades = { blue: { engine: false }, red: { engine: false } };
     state.round = roundNumber;
     state.turn = "blue";
     state.turnsRemaining = 1;
     state.bonusFromDouble = false;
     state.movedThisTurn = false;
+    state.movesUsedThisTurn = 0;
     state.wind = randomWind(state.settings);
     state.winner = null;
     state.shotNumber = 0;
@@ -2047,6 +2475,10 @@
     receivedInitialGameToken = null;
     winnerModalDismissed = false;
     doubleStrikeSelected = false;
+    selectedWeapon = "standard";
+    pendingArmAfterPurchase = null;
+    teleportMode = false;
+    dom.canvasFrame.classList.remove("teleport-active");
     updateDoubleStrikeButton();
     resetInspectionView(false);
     dom.homeNotice.textContent = "";
@@ -2230,14 +2662,15 @@
     const team = localTeam();
     const point = canvasToWorld(clientX, clientY);
     const center = tankCenter(gameState, team);
-    const forward = team === "blue" ? point.x - center.x : center.x - point.x;
-    const rise = point.y - center.y;
-    const elevation = clamp(Math.atan2(rise, Math.max(.15, forward)) * 180 / Math.PI, 5, 85);
-    const distance = Math.hypot(Math.max(0, forward), rise);
-    const power = clamp(18 + distance / Math.max(1, gameState.settings.worldWidth * .43) * 82, 18, 100);
-    dom.angleInput.value = String(Math.round(elevation));
+    const dx = point.x - center.x;
+    const rise = Math.max(0.1, point.y - center.y);
+    const worldAngle = clamp(Math.atan2(rise, dx) * 180 / Math.PI, 5, 175);
+    const aim = clamp(90 - worldAngle, -85, 85);
+    const distance = Math.hypot(dx, rise);
+    const power = clamp(18 + distance / Math.max(1, gameState.settings.worldWidth * .58) * (MAX_POWER - 18), 18, MAX_POWER);
+    dom.angleInput.value = String(Math.round(aim));
     dom.powerInput.value = String(Math.round(power));
-    gameState.tanks[team].angle = round(elevation, 1);
+    gameState.tanks[team].angle = round(aim, 1);
     gameState.tanks[team].power = round(power, 1);
     updateAimOutputs();
     requestRender();
@@ -2245,6 +2678,11 @@
 
   function handleCanvasPointerDown(event) {
     if (!gameState) return;
+    if (!inspectionCamera.active && teleportMode && canLocalAct()) {
+      requestTeleport(canvasToWorld(event.clientX, event.clientY).x);
+      event.preventDefault();
+      return;
+    }
     if (!inspectionCamera.active && canLocalAct()) {
       dom.canvas.setPointerCapture?.(event.pointerId);
       aimDrag.active = true;
@@ -3352,7 +3790,8 @@
     const packet = animation.packet;
 
     if (animation.phase === "travel") {
-      const progress = clamp(elapsed / animation.travelDuration, 0, 1);
+      const rawProgress = clamp(elapsed / animation.travelDuration, 0, 1);
+      const progress = packet.deployRequested ? Math.min(rawProgress, .96) : rawProgress;
       const exactIndex = progress * (packet.trajectory.length - 1);
       const index = Math.floor(exactIndex);
       const nextIndex = Math.min(index + 1, packet.trajectory.length - 1);
@@ -3362,7 +3801,8 @@
       const x = a.x + (b.x - a.x) * blend;
       const y = a.y + (b.y - a.y) * blend;
       drawProjectileTrail(packet.trajectory, index);
-      drawProjectile(x, y, packet.shooter, packet.doubleStrike);
+      const parachuteOpen = packet.weapon === "parachute" && packet.parachuteDeployed && index >= (packet.parachuteDeployIndex || 0);
+      drawProjectile(x, y, packet, parachuteOpen);
 
       if (progress >= 1) {
         animation.phase = "explosion";
@@ -3373,7 +3813,7 @@
       }
     } else {
       const explosionProgress = clamp((now - animation.explosionStart) / animation.explosionDuration, 0, 1);
-      if (packet.impact && packet.impact.type !== "out") drawExplosion(packet.impact.x, packet.impact.y, explosionProgress, packet.hitTeam, packet.doubleStrike);
+      if (packet.impact && packet.impact.type !== "out") drawExplosion(packet.impact.x, packet.impact.y, explosionProgress, packet);
       if (explosionProgress >= 1) finishShotAnimation();
     }
   }
@@ -3396,9 +3836,10 @@
     ctx.restore();
   }
 
-  function drawProjectile(x, y, team, doubleStrike = false) {
+  function drawProjectile(x, y, packet, parachuteOpen = false) {
     const p = worldToCanvas(x, y);
-    const scale = doubleStrike ? 2 : 1;
+    const team = packet.shooter;
+    const scale = packet.weapon === "bigBertha" ? 2.35 : packet.doubleStrike ? 2 : 1;
     const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 18 * scale);
     glow.addColorStop(0, "rgba(255,255,255,1)");
     glow.addColorStop(.24, team === "blue" ? "rgba(79,164,255,.95)" : "rgba(255,92,99,.95)");
@@ -3407,16 +3848,37 @@
     ctx.beginPath();
     ctx.arc(p.x, p.y, 18 * scale, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "white";
+    ctx.fillStyle = packet.weapon === "bigBertha" ? "#322c25" : "white";
     ctx.beginPath();
     ctx.arc(p.x, p.y, 4.3 * scale, 0, Math.PI * 2);
     ctx.fill();
+
+    if (parachuteOpen) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(230,220,190,.92)";
+      ctx.fillStyle = team === "blue" ? "rgba(45,88,130,.95)" : "rgba(132,48,50,.95)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(p.x - 3, p.y - 3);
+      ctx.lineTo(p.x - 12, p.y - 24);
+      ctx.moveTo(p.x + 3, p.y - 3);
+      ctx.lineTo(p.x + 12, p.y - 24);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 24, 13, Math.PI, 0);
+      ctx.lineTo(p.x + 13, p.y - 24);
+      ctx.quadraticCurveTo(p.x, p.y - 15, p.x - 13, p.y - 24);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
-  function drawExplosion(x, y, progress, hitTeam, doubleStrike = false) {
+  function drawExplosion(x, y, progress, packet) {
     const p = worldToCanvas(x, y);
-    const scale = doubleStrike ? 2 : 1;
-    const radius = (16 + Math.sin(progress * Math.PI) * 80) * scale;
+    const hitTeam = packet.hitTeam || packet.hitTeams?.[0];
+    const radiusWorldPx = Math.max(35, packet.blastRadius * activeCanvasMetrics.sx);
+    const radius = (12 + Math.sin(progress * Math.PI) * radiusWorldPx);
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     const blast = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius);
@@ -3429,10 +3891,12 @@
     ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
     ctx.fill();
 
+    const particleCount = packet.weapon === "bigBertha" ? 80 : packet.doubleStrike ? 42 : 24;
+    const particleScale = packet.weapon === "bigBertha" ? 4 : packet.doubleStrike ? 2 : 1;
     const random = mulberry32((gameState.shotNumber + 1) * 1299709);
-    for (let i = 0; i < (doubleStrike ? 42 : 24); i += 1) {
+    for (let i = 0; i < particleCount; i += 1) {
       const angle = random() * Math.PI * 2;
-      const distance = progress * (30 + random() * 90) * scale;
+      const distance = progress * (30 + random() * 90) * particleScale;
       const px = p.x + Math.cos(angle) * distance;
       const py = p.y + Math.sin(angle) * distance;
       ctx.globalAlpha = 1 - progress;
@@ -3512,14 +3976,14 @@
   }
 
   function toggleDoubleStrike() {
-    if (!canLocalAct()) return;
+    if (!canLocalAct() || selectedWeapon !== "standard") return;
     doubleStrikeSelected = !doubleStrikeSelected;
     updateDoubleStrikeButton();
     playUiSound();
   }
 
   function updateAimOutputs() {
-    dom.angleOutput.textContent = `${dom.angleInput.value}°`;
+    dom.angleOutput.textContent = formatAimAngle(dom.angleInput.value);
     dom.powerOutput.textContent = dom.powerInput.value;
     requestRender();
   }
@@ -3561,6 +4025,12 @@
   dom.powerInput.addEventListener("input", updateAimOutputs);
   dom.fireButton.addEventListener("click", requestFire);
   dom.doubleStrikeButton.addEventListener("click", toggleDoubleStrike);
+  dom.standardWeaponButton.addEventListener("click", () => armWeapon("standard"));
+  dom.parachuteWeaponButton.addEventListener("click", () => requestArmouryItem("parachute"));
+  dom.berthaWeaponButton.addEventListener("click", () => requestArmouryItem("bigBertha"));
+  dom.teleportWeaponButton.addEventListener("click", () => requestArmouryItem("teleport"));
+  dom.engineUpgradeButton.addEventListener("click", () => requestArmouryItem("engine"));
+  dom.repairKitButton.addEventListener("click", () => requestArmouryItem("repair"));
   dom.chatForm.addEventListener("submit", submitChat);
   dom.soundButton.addEventListener("click", toggleSound);
   dom.worldToolButton.addEventListener("click", toggleBattlefieldPanel);

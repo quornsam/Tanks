@@ -1005,3 +1005,23 @@ body.game-active main { height: calc(100dvh - 58px); }
   body.game-active .brand-lockup { padding: 2px 0 7px; }
   body.game-active main { height: calc(100dvh - 48px); }
 }
+
+
+/* v10 armoury and economy */
+.credit-readout { display:inline-flex; align-items:center; justify-content:center; margin-top:3px; padding:2px 6px; border:1px solid rgba(255,255,255,.2); border-radius:3px; background:#0d1726; color:#f0c86b; font-size:.58rem; font-weight:900; letter-spacing:.06em; }
+.inline-credits { color:#f0c86b; font-size:.7em; white-space:nowrap; }
+.armoury-panel .panel-body { padding-top:7px; }
+.weapon-status { margin:0 0 7px; padding:5px 7px; border-left:3px solid #b8954e; background:#101b2b; color:#dbe5ee; font-size:.64rem; font-weight:800; }
+.armoury-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+.armoury-button { min-width:0; padding:7px 6px; border:1px solid #33445b; border-radius:3px; background:#121d2d; color:#dce6ef; text-align:left; cursor:pointer; }
+.armoury-button strong,.armoury-button span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.armoury-button strong { font-size:.61rem; letter-spacing:.02em; }
+.armoury-button span { margin-top:2px; color:#8ea1b5; font-size:.49rem; }
+.armoury-button:hover:not(:disabled),.armoury-button.active { border-color:#c4a45b; background:#233043; }
+.armoury-button.active { box-shadow:inset 3px 0 #d4b45f; }
+.armoury-button:disabled { opacity:.43; cursor:not-allowed; }
+.armoury-note { display:block; margin-top:7px; color:#8294a8; font-size:.49rem; line-height:1.35; }
+.fire-button.deploy-ready { background:#d1b35e; color:#17202a; }
+.canvas-frame.teleport-active { cursor:crosshair; outline:2px solid rgba(218,187,92,.7); outline-offset:-3px; }
+@media (max-height:760px) { .armoury-grid { grid-template-columns:repeat(3,1fr); } .armoury-button { padding:5px; } .armoury-note { display:none; } }
+@media (max-width:720px) { .armoury-grid { grid-template-columns:1fr 1fr; } }
