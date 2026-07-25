@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 19;
+  const APP_VERSION = 20;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
