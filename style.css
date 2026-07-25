@@ -1025,3 +1025,39 @@ body.game-active main { height: calc(100dvh - 58px); }
 .canvas-frame.teleport-active { cursor:crosshair; outline:2px solid rgba(218,187,92,.7); outline-offset:-3px; }
 @media (max-height:760px) { .armoury-grid { grid-template-columns:repeat(3,1fr); } .armoury-button { padding:5px; } .armoury-note { display:none; } }
 @media (max-width:720px) { .armoury-grid { grid-template-columns:1fr 1fr; } }
+
+
+/* v11 shared armoury, compact accordion panels and unambiguous aiming */
+.armoury-tool { right: 186px; font-size: 1.05rem; }
+.team-supply-badge.blue-supply { color:#77c8ff; background:rgba(36,126,186,.18); }
+.team-supply-badge.red-supply { color:#ff8b8e; background:rgba(174,45,50,.20); }
+.armoury-panel .panel-heading { gap:8px; }
+.armoury-panel .panel-heading > div:first-child { min-width:0; }
+.armoury-panel h3 { white-space:normal; }
+.armoury-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+.armoury-button { min-height:48px; padding:7px 7px; overflow:visible; }
+.armoury-button strong,
+.armoury-button span { overflow:visible; text-overflow:clip; white-space:normal; line-height:1.18; }
+.armoury-button strong { font-size:.62rem; }
+.armoury-button span { font-size:.50rem; }
+.armoury-button b { display:inline; }
+body.game-active .side-column > .collapsible-panel { flex:0 0 auto; min-width:0; }
+body.game-active .side-column > .chat-panel:not(.collapsed) { flex:1 1 120px; }
+body.game-active .panel-body,
+body.game-active .round-action-grid,
+body.game-active .game-world-control,
+body.game-active .telemetry-grid { min-width:0; max-width:100%; }
+.round-action-button,
+.round-action-button strong,
+.round-action-button span { min-width:0; white-space:normal; overflow-wrap:anywhere; }
+.control-title > span:first-child { white-space:nowrap; }
+@media (max-height:760px) {
+  .armoury-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .armoury-button { min-height:40px; padding:5px 6px; }
+}
+@media (max-width:720px) {
+  .armoury-tool { right:186px; }
+  body.game-active .side-column .armoury-panel.mobile-open { display:block !important; width:100%; align-self:flex-end; }
+  body.game-active .side-column .armoury-panel:not(.collapsed) { max-height:calc(100dvh - 260px); }
+  .armoury-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}

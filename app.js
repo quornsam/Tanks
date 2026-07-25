@@ -1,6 +1,7 @@
 (() => {
   "use strict";
 
+  const APP_VERSION = 11;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -102,7 +103,9 @@
     powerOutput: $("powerOutput"),
     fireButton: $("fireButton"),
     doubleStrikeButton: $("doubleStrikeButton"),
+    armouryToolButton: $("armouryToolButton"),
     localCreditsLabel: $("localCreditsLabel"),
+    armouryTeamBadge: $("armouryTeamBadge"),
     weaponStatus: $("weaponStatus"),
     standardWeaponButton: $("standardWeaponButton"),
     parachuteWeaponButton: $("parachuteWeaponButton"),
@@ -560,6 +563,23 @@
     return `${aim < 0 ? "L" : "R"} ${elevation}°`;
   }
 
+  function describeAim(value) {
+    const aim = clamp(Number(value) || 0, -85, 85);
+    return {
+      direction: aim < -0.01 ? "left" : aim > 0.01 ? "right" : "up",
+      elevation: round(90 - Math.abs(aim), 1)
+    };
+  }
+
+  function angleFromAimDescriptor(descriptor, fallback) {
+    if (!descriptor || typeof descriptor.direction !== "string") return clamp(Number(fallback) || 0, -85, 85);
+    const elevation = clamp(Number(descriptor.elevation) || 90, 5, 90);
+    const magnitude = 90 - elevation;
+    if (descriptor.direction === "left") return -magnitude;
+    if (descriptor.direction === "right") return magnitude;
+    return 0;
+  }
+
   function locationSettings(location, existing = {}) {
     const preset = LOCATION_PRESETS[location] || LOCATION_PRESETS.earth;
     return {
@@ -674,7 +694,7 @@
       const outgoing = peer.connect(PREFIX + code, {
         reliable: true,
         serialization: "binary",
-        metadata: { application: "red-blue-tanks", version: 8, request: "join" }
+        metadata: { application: "red-blue-tanks", version: APP_VERSION, request: "join" }
       });
       connection = outgoing;
       wireConnection(outgoing);
@@ -961,7 +981,7 @@
     const scores = session.scores ? deepClone(session.scores) : { blue: 0, red: 0 };
     const roundNumber = Number.isFinite(session.round) ? session.round : 1;
     const state = {
-      version: 10,
+      version: APP_VERSION,
       seed,
       settings,
       terrain: terrain.map(value => round(value, 3)),
@@ -1237,6 +1257,7 @@
     }
     hideCanvasMessage();
     setScreen("game");
+    prepareGameplayPanels();
 
     dom.blueRoleLabel.textContent = role === "guest" ? "HOST" : "YOU";
     dom.redRoleLabel.textContent = role === "guest" ? "YOU" : role === "bot" ? "BOT" : "GUEST";
@@ -1280,7 +1301,7 @@
       state.tanks[team].power = clamp(Number(state.tanks[team].power) || STANDARD_POWER, 18, MAX_POWER);
     }
     state.movedThisTurn = state.movesUsedThisTurn >= maxMovesForTeam(state.turn, state);
-    state.version = 10;
+    state.version = APP_VERSION;
     return state;
   }
 
@@ -1401,6 +1422,11 @@
     const credits = gameState.credits?.[team] || 0;
     const inventory = gameState.inventory?.[team] || { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 };
     dom.localCreditsLabel.textContent = `${credits} CR`;
+    if (dom.armouryTeamBadge) {
+      dom.armouryTeamBadge.textContent = team.toUpperCase();
+      dom.armouryTeamBadge.classList.toggle("red-supply", team === "red");
+      dom.armouryTeamBadge.classList.toggle("blue-supply", team === "blue");
+    }
     dom.parachuteCount.textContent = String(inventory.parachute || 0);
     dom.berthaCount.textContent = String(inventory.bigBertha || 0);
     dom.teleportCount.textContent = String(inventory.teleport || 0);
@@ -1680,7 +1706,7 @@
 
     if (role === "guest") {
       localInputPending = true;
-      sendNetwork({ type: "input", action: "fire", angle, power, doubleStrike, weapon });
+      sendNetwork({ type: "input", action: "fire", angle, aim: describeAim(angle), power, doubleStrike, weapon, appVersion: APP_VERSION });
       updateGameControls();
     } else {
       authoritativeFire(team, angle, power, doubleStrike, weapon);
@@ -1723,7 +1749,8 @@
     if (data.action === "move") {
       authoritativeMove("red", Number(data.direction));
     } else if (data.action === "fire") {
-      authoritativeFire("red", Number(data.angle), Number(data.power), Boolean(data.doubleStrike), String(data.weapon || "standard"));
+      const redAngle = angleFromAimDescriptor(data.aim, Number(data.angle));
+      authoritativeFire("red", redAngle, Number(data.power), Boolean(data.doubleStrike), String(data.weapon || "standard"));
     } else if (data.action === "teleport") {
       authoritativeTeleport("red", Number(data.x));
     }
@@ -3921,6 +3948,20 @@
   function togglePanel(panel, forceCollapsed = null) {
     if (!panel) return;
     const collapsed = forceCollapsed === null ? !panel.classList.contains("collapsed") : forceCollapsed;
+
+    // The right-hand cockpit is an accordion for detailed windows. This keeps
+    // every button readable without allowing panels to overlap or leave the viewport.
+    if (!collapsed && panel.parentElement === dom.sideColumn && panel.dataset.panel !== "chat") {
+      dom.sideColumn.querySelectorAll(".collapsible-panel").forEach(other => {
+        if (other !== panel && other.dataset.panel !== "chat") setPanelCollapsed(other, true);
+      });
+    }
+    setPanelCollapsed(panel, collapsed);
+    markCanvasResize();
+  }
+
+  function setPanelCollapsed(panel, collapsed) {
+    if (!panel) return;
     panel.classList.toggle("collapsed", collapsed);
     const button = panel.querySelector(".collapse-button");
     if (button) {
@@ -3930,7 +3971,21 @@
       button.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${name}`);
       button.setAttribute("aria-expanded", String(!collapsed));
     }
-    markCanvasResize();
+    if (panel.dataset.panel === "armoury") dom.armouryToolButton?.classList.toggle("active", !collapsed);
+    if (panel.dataset.panel === "battlefield") dom.worldToolButton?.classList.toggle("active", !collapsed);
+  }
+
+  function prepareGameplayPanels() {
+    if (!dom.sideColumn) return;
+    const armoury = dom.sideColumn.querySelector('[data-panel="armoury"]');
+    dom.sideColumn.querySelectorAll(".collapsible-panel").forEach(panel => {
+      delete panel.dataset.autoPrepared;
+      if (panel.dataset.panel === "armoury") setPanelCollapsed(panel, false);
+      else if (panel.dataset.panel === "chat") setPanelCollapsed(panel, window.innerWidth <= 720);
+      else setPanelCollapsed(panel, true);
+    });
+    armoury?.classList.remove("mobile-open");
+    dom.armouryToolButton?.classList.toggle("active", Boolean(armoury && !armoury.classList.contains("collapsed")));
   }
 
   function fitPanelsToViewport() {
@@ -3940,12 +3995,24 @@
     document.querySelectorAll(".collapsible-panel").forEach(panel => {
       if (!panel.dataset.autoPrepared) {
         panel.dataset.autoPrepared = "true";
-        if (panel.dataset.panel === "log") togglePanel(panel, true);
-        if (short && panel.dataset.panel === "telemetry") togglePanel(panel, true);
-        if ((short || narrow) && panel.dataset.panel === "battlefield") togglePanel(panel, true);
-        if (window.innerWidth <= 720 && panel.dataset.panel === "chat") togglePanel(panel, true);
+        if (panel.dataset.panel === "log" || panel.dataset.panel === "telemetry" || panel.dataset.panel === "battlefield") setPanelCollapsed(panel, true);
+        if (panel.dataset.panel === "armoury") setPanelCollapsed(panel, false);
+        if ((short || narrow) && panel.dataset.panel === "chat") setPanelCollapsed(panel, true);
       }
     });
+  }
+
+  function toggleArmouryPanel() {
+    const panel = dom.sideColumn.querySelector('[data-panel="armoury"]');
+    if (!panel) return;
+    const opening = panel.classList.contains("collapsed");
+    if (window.innerWidth <= 720) {
+      panel.classList.toggle("mobile-open", opening);
+      const chat = dom.sideColumn.querySelector('[data-panel="chat"]');
+      if (opening && chat) setPanelCollapsed(chat, true);
+    }
+    togglePanel(panel, !opening);
+    dom.armouryToolButton.classList.toggle("active", opening);
   }
 
   function toggleBattlefieldPanel() {
@@ -4033,6 +4100,7 @@
   dom.repairKitButton.addEventListener("click", () => requestArmouryItem("repair"));
   dom.chatForm.addEventListener("submit", submitChat);
   dom.soundButton.addEventListener("click", toggleSound);
+  dom.armouryToolButton.addEventListener("click", toggleArmouryPanel);
   dom.worldToolButton.addEventListener("click", toggleBattlefieldPanel);
   dom.locatorButton.addEventListener("click", toggleInspectionMode);
   dom.fullscreenButton.addEventListener("click", toggleFullscreen);
@@ -4065,7 +4133,12 @@
   dom.canvas.addEventListener("pointercancel", handleCanvasPointerUp);
   dom.canvas.addEventListener("wheel", handleCanvasWheel, { passive: false });
   document.querySelectorAll(".collapse-button").forEach(button => {
-    button.addEventListener("click", () => togglePanel(button.closest(".collapsible-panel")));
+    button.addEventListener("click", () => {
+      const panel = button.closest(".collapsible-panel");
+      togglePanel(panel);
+      if (panel?.dataset.panel === "armoury") dom.armouryToolButton.classList.toggle("active", !panel.classList.contains("collapsed"));
+      if (panel?.dataset.panel === "battlefield") dom.worldToolButton.classList.toggle("active", !panel.classList.contains("collapsed"));
+    });
   });
   const canvasResizeObserver = typeof ResizeObserver === "function"
     ? new ResizeObserver(() => {

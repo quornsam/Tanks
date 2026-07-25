@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v10</title>
-  <link rel="stylesheet" href="style.css?v=10">
+  <title>Red vs Blue — P2P Tanks v11</title>
+  <link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -211,6 +211,7 @@
                 </div>
               </div>
               <div id="canvasViewLabel" class="canvas-view-label">WHOLE BATTLEFIELD</div>
+              <button id="armouryToolButton" class="canvas-tool armoury-tool" title="Open armoury" aria-label="Open armoury">▦</button>
               <button id="worldToolButton" class="canvas-tool world-tool" title="World and battlefield controls" aria-label="World and battlefield controls">◉</button>
               <button id="soundButton" class="canvas-tool sound-tool active" title="Toggle sound" aria-label="Toggle sound">♪</button>
               <button id="locatorButton" class="canvas-tool locator-tool" title="Inspect terrain" aria-label="Inspect terrain">⌖</button>
@@ -228,7 +229,7 @@
               </div>
 
               <label class="aim-control">
-                <span class="control-title">DIRECTION <output id="angleOutput">R 45°</output></span>
+                <span class="control-title"><span>◀ LEFT · RIGHT ▶</span><output id="angleOutput">R 45°</output></span>
                 <input id="angleInput" type="range" min="-85" max="85" step="1" value="45">
               </label>
 
@@ -270,10 +271,10 @@
             </section>
 
 
-            <section class="panel compact-panel armoury-panel collapsible-panel collapsed" data-panel="armoury">
+            <section class="panel compact-panel armoury-panel collapsible-panel" data-panel="armoury">
               <div class="panel-heading compact">
                 <div><p class="eyebrow">SUPPLY</p><h3>Armoury <span id="localCreditsLabel" class="inline-credits">50 CR</span></h3></div>
-                <button class="collapse-button" type="button" aria-label="Expand armoury" title="Expand panel">+</button>
+                <div class="panel-heading-actions"><span id="armouryTeamBadge" class="mini-badge team-supply-badge">BLUE</span><button class="collapse-button" type="button" aria-label="Collapse armoury" title="Collapse panel">−</button></div>
               </div>
               <div class="panel-body">
                 <p id="weaponStatus" class="weapon-status">Standard shell armed</p>
@@ -356,6 +357,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>
