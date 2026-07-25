@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 18;
+  const APP_VERSION = 19;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -2053,7 +2053,7 @@
     dom.parachuteCount.textContent = String(inventory.parachute || 0);
     dom.berthaCount.textContent = String(inventory.bigBertha || 0);
     dom.teleportCount.textContent = String(inventory.teleport || 0);
-    if (dom.tunnelStatus) dom.tunnelStatus.textContent = `${WEAPON_COSTS.tunnel} CR · uses one move`;
+    if (dom.tunnelStatus) dom.tunnelStatus.textContent = `${WEAPON_COSTS.tunnel} CR · ends your turn`;
     dom.repairCount.textContent = String(inventory.repair || 0);
     dom.engineStatus.textContent = gameState.upgrades?.[team]?.engine ? "INSTALLED · three moves" : `${inventory.engine || 0 ? "INSTALL" : "10 CR"} · owned ${inventory.engine || 0}`;
 
@@ -2062,7 +2062,7 @@
       parachute: "Parachute bomb armed — Space launches, Space again deploys",
       bigBertha: "Big Bertha armed — large circular terrain blast",
       teleport: "Teleport armed — click or touch a destination",
-      tunnel: "Tunnel armed — aim into adjacent terrain and press TUNNEL"
+      tunnel: "Tunnel armed — aim into adjacent terrain; tunnelling ends your turn"
     };
     dom.weaponStatus.textContent = labels[selectedWeapon] || labels.standard;
     const buttons = {
@@ -2109,7 +2109,7 @@
       }
       selectedWeapon = "tunnel";
       doubleStrikeSelected = false;
-      showCanvasMessage("TUNNEL ARMED", "Aim the turret into adjacent terrain, then press TUNNEL. It costs 2 credits and uses one movement allowance.", "purchase");
+      showCanvasMessage("TUNNEL ARMED", "Aim the turret into adjacent terrain, then press TUNNEL. It costs 2 credits and immediately ends your turn.", "purchase");
       updateArmouryUI();
       updateGameControls();
       return;
@@ -2361,11 +2361,16 @@
     tank.tunnelY = round(y2 - tankWorldHeight(gameState) * 0.80, 3);
     tank.angle = round(safeAngle, 1);
     gameState.credits[team] -= WEAPON_COSTS.tunnel;
-    gameState.movesUsedThisTurn += 1;
-    gameState.movedThisTurn = gameState.movesUsedThisTurn >= maxMovesForTeam(team);
+    // Tunnelling is a complete action-turn. Bigger Engine does not grant
+    // another move after a tunnel; a queued second turn still remains a
+    // separate turn under the existing Double Strike rules.
+    gameState.movesUsedThisTurn = maxMovesForTeam(team);
+    gameState.movedThisTurn = true;
+    advanceTurnAfterShot(gameState, team, false);
+    gameState.movesUsedThisTurn = 0;
+    gameState.movedThisTurn = false;
     localInputPending = false;
-    const remaining = Math.max(0, maxMovesForTeam(team) - gameState.movesUsedThisTurn);
-    const message = `${TEAM_NAMES[team]} tunnelled through the terrain for 2 credits${remaining ? ` (${remaining} tunnel${remaining === 1 ? "" : "s"} or moves left)` : ""}.`;
+    const message = `${TEAM_NAMES[team]} tunnelled through the terrain for 2 credits. Their turn is over.`;
     const movement = { team, fromX, toX: tank.x, fromY, toY: tank.tunnelY, type: "tunnel" };
     startMovementAnimation(team, fromX, tank.x, true, fromY, tank.tunnelY, "tunnel");
     playMoveSound();
@@ -3004,7 +3009,11 @@
     if (hitTeams.length) {
       hitTeams.forEach(team => {
         const amount = Number(packet.hitDamage?.[team]) || 1;
-        addEvent(`${TEAM_NAMES[packet.shooter]} ${amount === 0.5 ? "clipped" : "hit"} ${TEAM_NAMES[team]}${amount === 0.5 ? " for half damage" : " with the blast"}.`, "hit");
+        if (team === packet.shooter) {
+          addEvent(`${TEAM_NAMES[packet.shooter]} ${amount === 0.5 ? "clipped their own tank for half damage" : "hit their own tank"}.`, "hit");
+        } else {
+          addEvent(`${TEAM_NAMES[packet.shooter]} ${amount === 0.5 ? "clipped" : "hit"} ${TEAM_NAMES[team]}${amount === 0.5 ? " for half damage" : " with the blast"}.`, "hit");
+        }
       });
       playHitSound();
     } else if (packet.impact && packet.impact.type === "terrain") {
@@ -3186,7 +3195,7 @@
 
   function purchaseInstruction(name) {
     const key = String(name || "").toLowerCase();
-    if (key.includes("tunnel")) return "Aim into terrain and press TUNNEL. It costs 2 credits and consumes one movement allowance.";
+    if (key.includes("tunnel")) return "Aim into terrain and press TUNNEL. It costs 2 credits and immediately ends your turn.";
     if (key.includes("parachute")) return "Fire it normally, then press Space again to open the parachute and drift down.";
     if (key.includes("bertha")) return "Arm it in the Armoury. It makes a large circular crater and costs the opponent a double turn.";
     if (key.includes("teleport")) return "Arm it, then click or touch the battlefield to move your tank there.";

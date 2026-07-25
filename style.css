@@ -2039,3 +2039,252 @@ body.game-active .side-column .round-panel.mobile-open { display: block !importa
 @media (min-width: 721px) {
   body.game-active .side-column .round-panel { display: block !important; }
 }
+
+/* v19 — readable player cards */
+.player-card-grid,
+body.game-active .player-card-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+}
+
+.player-card-grid .tank-card,
+body.game-active .player-card-grid .tank-card {
+  min-width: 0;
+  min-height: 76px;
+  padding: 7px 9px 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title status"
+    "visual recent"
+    "loadout loadout";
+  column-gap: 8px;
+  row-gap: 4px;
+  overflow: hidden;
+}
+
+.player-card-grid .tank-card-title,
+body.game-active .player-card-grid .tank-card-title {
+  min-width: 0;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.player-card-grid .tank-identity,
+body.game-active .player-card-grid .tank-identity {
+  min-width: 0;
+  overflow: visible;
+}
+
+.player-card-grid .tank-identity strong,
+.player-card-grid .tank-identity small,
+body.game-active .player-card-grid .tank-identity strong,
+body.game-active .player-card-grid .tank-identity small {
+  display: block;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.08;
+}
+
+.player-card-grid .tank-identity strong,
+body.game-active .player-card-grid .tank-identity strong {
+  font-size: .78rem;
+  letter-spacing: .02em;
+}
+
+.player-card-grid .tank-identity small,
+body.game-active .player-card-grid .tank-identity small {
+  margin-top: 2px;
+  font-size: .58rem;
+}
+
+.player-card-grid .tank-card-title > span:not(.team-swatch),
+body.game-active .player-card-grid .tank-card-title > span:not(.team-swatch) {
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 4px;
+  color: #aeb8b3;
+  font-size: .5rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.player-card-grid .tank-card-visual-row,
+body.game-active .player-card-grid .tank-card-visual-row {
+  display: grid;
+  grid-area: visual;
+  grid-template-columns: minmax(88px, 138px);
+  min-height: 34px;
+  margin: 0;
+  align-items: center;
+}
+
+.player-card-grid .status-tank-canvas,
+body.game-active .player-card-grid .status-tank-canvas {
+  display: block;
+  width: min(100%, 138px);
+  max-width: 138px;
+  height: auto;
+  aspect-ratio: 190 / 72;
+  justify-self: start;
+}
+
+.player-card-grid .recent-actions,
+body.game-active .player-card-grid .recent-actions {
+  grid-area: recent;
+  width: min(100%, 150px);
+  min-width: 96px;
+  min-height: 34px;
+  margin: 0;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.player-card-grid .recent-actions span,
+body.game-active .player-card-grid .recent-actions span {
+  display: block;
+  min-width: 0;
+  font-size: .56rem;
+  line-height: 1.18;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.player-card-grid .recent-actions span.previous,
+body.game-active .player-card-grid .recent-actions span.previous {
+  color: #7f8a85;
+}
+
+.player-card-grid .team-loadout,
+body.game-active .player-card-grid .team-loadout {
+  grid-area: loadout;
+  min-width: 0;
+  min-height: 17px;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  overflow: visible;
+  white-space: normal;
+}
+
+.player-card-grid .loadout-chip,
+.player-card-grid .loadout-empty,
+body.game-active .player-card-grid .loadout-chip,
+body.game-active .player-card-grid .loadout-empty {
+  padding: 2px 4px;
+  font-size: .47rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.player-card-grid .tank-card-status,
+body.game-active .player-card-grid .tank-card-status {
+  grid-area: status;
+  align-self: start;
+  margin: 0;
+  gap: 5px;
+}
+
+.player-card-grid .credit-readout,
+body.game-active .player-card-grid .credit-readout {
+  font-size: .62rem;
+  white-space: nowrap;
+}
+
+.player-card-grid .hit-pips,
+body.game-active .player-card-grid .hit-pips {
+  display: flex !important;
+  gap: 2px;
+}
+
+.player-card-grid .hit-pip,
+body.game-active .player-card-grid .hit-pip {
+  width: 12px;
+  height: 5px;
+}
+
+@media (max-width: 720px) {
+  .player-card-grid,
+  body.game-active .player-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 4px !important;
+  }
+  .player-card-grid .tank-card,
+  body.game-active .player-card-grid .tank-card {
+    min-height: 66px;
+    padding: 5px 6px 6px;
+    grid-template-areas:
+      "title status"
+      "recent recent"
+      "loadout loadout";
+    row-gap: 3px;
+  }
+  .player-card-grid .tank-card-visual-row,
+  body.game-active .player-card-grid .tank-card-visual-row {
+    display: none !important;
+  }
+  .player-card-grid .tank-identity strong,
+  body.game-active .player-card-grid .tank-identity strong { font-size: .7rem; }
+  .player-card-grid .tank-identity small,
+  body.game-active .player-card-grid .tank-identity small { display: block !important; font-size: .52rem; }
+  .player-card-grid .tank-card-title > span:not(.team-swatch),
+  body.game-active .player-card-grid .tank-card-title > span:not(.team-swatch) { display: none; }
+  .player-card-grid .recent-actions,
+  body.game-active .player-card-grid .recent-actions {
+    width: auto;
+    min-width: 0;
+    min-height: 26px;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .player-card-grid .recent-actions span,
+  body.game-active .player-card-grid .recent-actions span { font-size: .52rem; }
+  .player-card-grid .recent-actions span.previous,
+  body.game-active .player-card-grid .recent-actions span.previous { display: none; }
+  .player-card-grid .loadout-chip,
+  .player-card-grid .loadout-empty,
+  body.game-active .player-card-grid .loadout-chip,
+  body.game-active .player-card-grid .loadout-empty { font-size: .44rem; }
+  .player-card-grid .credit-readout,
+  body.game-active .player-card-grid .credit-readout { font-size: .56rem; }
+}
+
+@media (max-width: 390px) {
+  .player-card-grid,
+  body.game-active .player-card-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .player-card-grid .tank-card,
+  body.game-active .player-card-grid .tank-card {
+    min-height: 58px;
+  }
+}
+
+/* v19 readability refinement */
+.player-card-grid .tank-identity strong,
+body.game-active .player-card-grid .tank-identity strong { font-size: .82rem; }
+.player-card-grid .tank-identity small,
+body.game-active .player-card-grid .tank-identity small { font-size: .62rem; }
+.player-card-grid .recent-actions span,
+body.game-active .player-card-grid .recent-actions span { font-size: .61rem; }
+.player-card-grid .loadout-chip,
+.player-card-grid .loadout-empty,
+body.game-active .player-card-grid .loadout-chip,
+body.game-active .player-card-grid .loadout-empty { font-size: .52rem; }
+@media (max-width: 720px) {
+  .player-card-grid .tank-identity strong,
+  body.game-active .player-card-grid .tank-identity strong { font-size: .74rem; }
+  .player-card-grid .tank-identity small,
+  body.game-active .player-card-grid .tank-identity small { font-size: .58rem; }
+  .player-card-grid .recent-actions span,
+  body.game-active .player-card-grid .recent-actions span { font-size: .58rem; }
+  .player-card-grid .loadout-chip,
+  .player-card-grid .loadout-empty,
+  body.game-active .player-card-grid .loadout-chip,
+  body.game-active .player-card-grid .loadout-empty { font-size: .49rem; }
+}

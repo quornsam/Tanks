@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-to-four player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v18</title>
-  <link rel="stylesheet" href="style.css?v=18">
+  <title>Red vs Blue — P2P Tanks v19</title>
+  <link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -325,11 +325,11 @@
                   <button id="parachuteWeaponButton" class="armoury-button" type="button"><strong>Parachute bomb</strong><span>10 CR · owned <b id="parachuteCount">0</b></span></button>
                   <button id="berthaWeaponButton" class="armoury-button" type="button"><strong>Big Bertha</strong><span>10 CR · owned <b id="berthaCount">0</b></span></button>
                   <button id="teleportWeaponButton" class="armoury-button" type="button"><strong>Teleport</strong><span>10 CR · owned <b id="teleportCount">0</b></span></button>
-                  <button id="tunnelWeaponButton" class="armoury-button tunnel-button" type="button"><strong>Tunnel</strong><span id="tunnelStatus">2 CR · uses one move</span></button>
+                  <button id="tunnelWeaponButton" class="armoury-button tunnel-button" type="button"><strong>Tunnel</strong><span id="tunnelStatus">2 CR · ends your turn</span></button>
                   <button id="engineUpgradeButton" class="armoury-button" type="button"><strong>Bigger engine</strong><span id="engineStatus">10 CR · owned 0</span></button>
                   <button id="repairKitButton" class="armoury-button" type="button"><strong>Repair kit</strong><span>20 CR · owned <b id="repairCount">0</b></span></button>
                 </div>
-                <small class="armoury-note">Special weapons give the opponent a double turn. Tunnel costs 2 credits per use and consumes one movement allowance.</small>
+                <small class="armoury-note">Special weapons give the opponent a double turn. Tunnel costs 2 credits and immediately ends your turn.</small>
               </div>
             </section>
 
@@ -403,6 +403,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>
