@@ -2516,3 +2516,6 @@ body.game-active .player-card-grid .hit-pip {
   .player-card-grid .hit-pips,
   body.game-active .player-card-grid .hit-pips { display: none !important; }
 }
+
+/* v21 — true-angle tunnels, traversable underground routes and daylight */
+.canvas-frame.tunnel-aim-active canvas { cursor: crosshair; }

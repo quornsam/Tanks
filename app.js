@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 20;
+  const APP_VERSION = 21;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -251,6 +251,7 @@
   let winnerModalDismissed = false;
   let doubleStrikeSelected = false;
   let selectedWeapon = "standard";
+  let normalAimMemory = 45;
   let activeCanvasMessageMode = null;
   let pendingArmAfterPurchase = null;
   let teleportMode = false;
@@ -802,13 +803,44 @@
     return 90 - clamp(Number(aim) || 0, -85, 85);
   }
 
-  // Tunnel mode mirrors the chosen elevation below the horizon. The slider's
-  // left/right direction remains unchanged, but the barrel cuts into the ground.
+  // Tunnel mode uses a true compass-like world angle rather than reusing the
+  // artillery elevation scale: 0° points right, 90° up, -90° down and ±180° left.
   function tunnelWorldAngle(aim) {
-    const safe = clamp(Number(aim) || 0, -85, 85);
-    const depression = 90 - Math.abs(safe);
-    if (Math.abs(safe) < 0.01) return -90;
-    return safe < 0 ? 180 + depression : -depression;
+    let value = Number(aim);
+    if (!Number.isFinite(value)) value = 0;
+    while (value > 180) value -= 360;
+    while (value < -180) value += 360;
+    return clamp(value, -180, 180);
+  }
+
+  function formatTunnelAngle(value) {
+    const angle = Math.round(tunnelWorldAngle(value));
+    const arrow = angle === 0 ? "→" : Math.abs(angle) === 180 ? "←" : angle === 90 ? "↑" : angle === -90 ? "↓" : angle > 0 && angle < 90 ? "↗" : angle > 90 ? "↖" : angle < -90 ? "↙" : "↘";
+    return `${angle}° ${arrow}`;
+  }
+
+  function configureAimControlForWeapon() {
+    if (!dom.angleInput || !gameState) return;
+    const tunnelMode = selectedWeapon === "tunnel";
+    const previousMode = dom.angleInput.dataset.mode || "shot";
+    if (tunnelMode && previousMode !== "tunnel") {
+      normalAimMemory = clamp(Number(dom.angleInput.value) || gameState.tanks?.[localTeam()]?.angle || 45, -85, 85);
+      dom.angleInput.min = "-180";
+      dom.angleInput.max = "180";
+      dom.angleInput.step = "1";
+      const saved = Number(gameState.tanks?.[localTeam()]?.lastTunnelAngle);
+      dom.angleInput.value = String(Number.isFinite(saved) ? tunnelWorldAngle(saved) : normalAimMemory < 0 ? 180 : 0);
+      dom.angleInput.dataset.mode = "tunnel";
+    } else if (!tunnelMode && previousMode === "tunnel") {
+      dom.angleInput.min = "-85";
+      dom.angleInput.max = "85";
+      dom.angleInput.step = "1";
+      const fallback = Number(gameState.tanks?.[localTeam()]?.angle);
+      dom.angleInput.value = String(clamp(Number.isFinite(normalAimMemory) ? normalAimMemory : fallback || 45, -85, 85));
+      dom.angleInput.dataset.mode = "shot";
+    } else if (!dom.angleInput.dataset.mode) {
+      dom.angleInput.dataset.mode = tunnelMode ? "tunnel" : "shot";
+    }
   }
 
   function normaliseAimAngle(team, angle, version = 10) {
@@ -1194,7 +1226,7 @@
           gameState.tunnels = Array.isArray(gameState.tunnels) ? gameState.tunnels : [];
           gameState.tunnels.push(data.tunnel);
           gameState.tunnels = gameState.tunnels.slice(-64);
-          if (data.movement?.team === localTeam()) selectedWeapon = "standard";
+          if (data.movement?.team === localTeam()) { selectedWeapon = "standard"; configureAimControlForWeapon(); }
         }
         gameState = mergeRuntimeMetadata(data.state, gameState);
         if (!gameState) return;
@@ -1644,6 +1676,7 @@
     movementAnimation = null;
     doubleStrikeSelected = false;
     selectedWeapon = "standard";
+    configureAimControlForWeapon();
     activeCanvasMessageMode = null;
     teleportMode = false;
     updateDoubleStrikeButton();
@@ -1700,6 +1733,7 @@
     state.tanks = state.tanks || {};
     state.spawnPositions = state.spawnPositions || {};
     state.tunnels = Array.isArray(state.tunnels) ? state.tunnels.slice(-64) : [];
+    state.tunnels.forEach((tunnel, index) => { if (tunnel.type === "tunnel" && !tunnel.id) tunnel.id = `legacy-${state.round || 1}-${index}`; });
     for (const team of state.activeTeams) {
       state.players[team] = {
         playerName: cleanProfileText(state.players[team]?.playerName, TEAM_NAMES[team]),
@@ -1718,6 +1752,11 @@
       state.tanks[team].power = clamp(Number(state.tanks[team].power) || STANDARD_POWER, 18, MAX_POWER);
       state.tanks[team].hits = Math.max(0, Math.round((Number(state.tanks[team].hits) || 0) * 2) / 2);
       if (typeof state.tanks[team].alive !== "boolean") state.tanks[team].alive = state.tanks[team].hits < state.settings.hitsToDestroy;
+      if (Number.isFinite(state.tanks[team].tunnelY) && !state.tanks[team].tunnelId) {
+        const centerY = state.tanks[team].tunnelY + tankWorldHeight(state) * .80;
+        const nearest = nearestTunnelLocation(state.tanks[team].x, centerY, state, tankWorldHeight(state) * 2.5);
+        if (nearest) { state.tanks[team].tunnelId = nearest.tunnel.id; state.tanks[team].tunnelT = round(nearest.t, 4); }
+      }
     }
     if (!Number.isFinite(state.round)) state.round = 1;
     if (!Number.isFinite(state.turnsRemaining)) state.turnsRemaining = 1;
@@ -1797,9 +1836,10 @@
     if (syncControls) {
       const tank = tanks[localTeam()];
       if (tank) {
-        dom.angleInput.value = tank.angle;
+        configureAimControlForWeapon();
+        if (selectedWeapon !== "tunnel") dom.angleInput.value = tank.angle;
         dom.powerInput.value = tank.power;
-        dom.angleOutput.textContent = formatAimAngle(tank.angle);
+        dom.angleOutput.textContent = selectedWeapon === "tunnel" ? formatTunnelAngle(dom.angleInput.value) : formatAimAngle(tank.angle);
         dom.powerOutput.textContent = Math.round(tank.power);
       }
     }
@@ -2021,7 +2061,7 @@
     dom.fireButton.querySelector("span").textContent = deployReady ? "DEPLOY PARACHUTE" : selectedWeapon === "bigBertha" ? "BIG BERTHA" : selectedWeapon === "parachute" ? "PARACHUTE BOMB" : selectedWeapon === "teleport" ? "PLACE TANK" : selectedWeapon === "tunnel" ? "TUNNEL" : "FIRE";
     dom.fireButton.querySelector("small").textContent = deployReady ? "Spacebar again" : "Spacebar";
     dom.doubleStrikeButton.disabled = !enabled || selectedWeapon !== "standard";
-    if (dom.tunnelWeaponButton) dom.tunnelWeaponButton.disabled = !enabled || movesRemaining <= 0 || (gameState.credits?.[localTeam()] || 0) < WEAPON_COSTS.tunnel;
+    if (dom.tunnelWeaponButton) dom.tunnelWeaponButton.disabled = !enabled || (gameState.credits?.[localTeam()] || 0) < WEAPON_COSTS.tunnel;
     dom.locatorButton.disabled = Boolean(animation || movementAnimation);
     const roundControlBusy = Boolean(animation || movementAnimation || pendingActionRequest || localActionRequest);
     dom.restartRoundButton.disabled = roundControlBusy;
@@ -2062,7 +2102,7 @@
       parachute: "Parachute bomb armed — Space launches, Space again deploys",
       bigBertha: "Big Bertha armed — large circular terrain blast",
       teleport: "Teleport armed — click or touch a destination",
-      tunnel: "Tunnel armed — aim into adjacent terrain; tunnelling ends your turn"
+      tunnel: "Tunnel armed — 0° is horizontal; drag or set any angle; tunnelling ends your turn"
     };
     dom.weaponStatus.textContent = labels[selectedWeapon] || labels.standard;
     const buttons = {
@@ -2078,7 +2118,7 @@
     dom.parachuteWeaponButton.disabled = busy || ((inventory.parachute || 0) < 1 && credits < WEAPON_COSTS.parachute);
     dom.berthaWeaponButton.disabled = busy || ((inventory.bigBertha || 0) < 1 && credits < WEAPON_COSTS.bigBertha);
     dom.teleportWeaponButton.disabled = busy || ((inventory.teleport || 0) < 1 && credits < WEAPON_COSTS.teleport);
-    if (dom.tunnelWeaponButton) dom.tunnelWeaponButton.disabled = busy || gameState.turn !== team || gameState.movesUsedThisTurn >= maxMovesForTeam(team) || credits < WEAPON_COSTS.tunnel;
+    if (dom.tunnelWeaponButton) dom.tunnelWeaponButton.disabled = busy || gameState.turn !== team || credits < WEAPON_COSTS.tunnel;
     dom.engineUpgradeButton.disabled = busy || gameState.upgrades?.[team]?.engine || ((inventory.engine || 0) < 1 && credits < WEAPON_COSTS.engine);
     dom.repairKitButton.disabled = busy || ((inventory.repair || 0) < 1 && credits < WEAPON_COSTS.repair);
   }
@@ -2087,6 +2127,7 @@
     if (!gameState) return;
     const safe = ["standard", "parachute", "bigBertha", "teleport", "tunnel"].includes(weapon) ? weapon : "standard";
     selectedWeapon = safe;
+    configureAimControlForWeapon();
     teleportMode = safe === "teleport";
     dom.canvasFrame.classList.toggle("teleport-active", teleportMode);
     if (safe !== "standard") {
@@ -2102,14 +2143,14 @@
     if (!gameState || gameState.winner || animation || movementAnimation) return;
     if (item === "tunnel") {
       const team = localTeam();
-      if (!canLocalAct() || gameState.movesUsedThisTurn >= maxMovesForTeam(team)) return;
+      if (!canLocalAct()) return;
       if ((gameState.credits?.[team] || 0) < WEAPON_COSTS.tunnel) {
         addEvent("Tunnel requires 2 credits.", "error");
         return;
       }
-      selectedWeapon = "tunnel";
+      armWeapon("tunnel");
       doubleStrikeSelected = false;
-      showCanvasMessage("TUNNEL ARMED", "Aim the turret into adjacent terrain, then press TUNNEL. It costs 2 credits and immediately ends your turn.", "purchase");
+      showCanvasMessage("TUNNEL ARMED", "Set an exact tunnel direction: 0° is right, ±180° is left, positive angles rise and negative angles descend. It costs 2 credits and ends your turn.", "purchase");
       updateArmouryUI();
       updateGameControls();
       return;
@@ -2273,32 +2314,72 @@
   function authoritativeMove(team, direction) {
     if (!gameState || animation || gameState.winner || gameState.turn !== team || gameState.movesUsedThisTurn >= maxMovesForTeam(team)) return false;
     const tank = gameState.tanks[team];
-    const step = moveStep() * Math.sign(direction);
-    const minX = gameState.settings.worldWidth * 0.045;
-    const maxX = gameState.settings.worldWidth * 0.955;
-    const candidate = clamp(tank.x + step, minX, maxX);
-    const safeDistance = tankWorldWidth() * 1.25;
+    const step = moveStep();
+    const fromX = tank.x;
+    const fromY = tankBaseY(gameState, team);
+    let candidateX;
+    let candidateY;
+    let movementType = "move";
 
-    const blocked = stateTeams().some(otherTeam => otherTeam !== team && gameState.tanks[otherTeam]?.alive && Math.abs(candidate - gameState.tanks[otherTeam].x) < safeDistance);
+    if (Number.isFinite(tank.tunnelY)) {
+      const underground = moveUndergroundTank(gameState, team, direction, step);
+      if (!underground || underground.blocked) {
+        rejectGuestInput(underground?.blocked ? "The tunnel ends here. Dig another section to continue." : "This tank is not aligned with a usable tunnel.", team);
+        return false;
+      }
+      candidateX = underground.x;
+      candidateY = underground.baseY;
+      if (underground.surface) {
+        delete tank.tunnelY;
+        delete tank.tunnelId;
+        delete tank.tunnelT;
+        movementType = "tunnel-exit";
+      } else {
+        tank.tunnelY = round(candidateY, 3);
+        tank.tunnelId = underground.tunnel.id;
+        tank.tunnelT = round(underground.t, 4);
+        movementType = "tunnel-move";
+      }
+    } else {
+      const minX = gameState.settings.worldWidth * 0.045;
+      const maxX = gameState.settings.worldWidth * 0.955;
+      candidateX = clamp(tank.x + step * Math.sign(direction), minX, maxX);
+      candidateY = terrainAt(candidateX, gameState);
+      const candidateCenterY = candidateY + tankWorldHeight(gameState) * .80;
+      const nearbyTunnel = nearestTunnelLocation(candidateX, candidateCenterY, gameState, tankWorldHeight(gameState) * 1.25);
+      if (nearbyTunnel && tunnelEndpointOpen(nearbyTunnel.tunnel, nearbyTunnel.t < .5 ? 0 : 1, gameState)) {
+        tank.tunnelId = nearbyTunnel.tunnel.id;
+        tank.tunnelT = round(nearbyTunnel.t, 4);
+        candidateX = nearbyTunnel.point.x;
+        candidateY = nearbyTunnel.point.y - tankWorldHeight(gameState) * .80;
+        tank.tunnelY = round(candidateY, 3);
+        movementType = "tunnel-enter";
+      }
+    }
+
+    const candidateCenter = { x: candidateX, y: candidateY + tankWorldHeight(gameState) * .80 };
+    const safeDistance = tankWorldWidth(gameState) * 1.15;
+    const blocked = stateTeams().some(otherTeam => {
+      if (otherTeam === team || !gameState.tanks[otherTeam]?.alive) return false;
+      const otherCenter = tankCenter(gameState, otherTeam);
+      return Math.hypot(candidateCenter.x - otherCenter.x, candidateCenter.y - otherCenter.y) < safeDistance;
+    });
     if (blocked) {
       rejectGuestInput("Movement blocked by another tank.", team);
       return false;
     }
 
-    // Tanks may climb steep banks. Their body rotates to match the local surface.
-    const fromX = tank.x;
-    const fromY = tankBaseY(gameState, team);
-    tank.x = round(candidate, 3);
-    delete tank.tunnelY;
+    tank.x = round(candidateX, 3);
     gameState.movesUsedThisTurn += 1;
     gameState.movedThisTurn = gameState.movesUsedThisTurn >= maxMovesForTeam(team);
     localInputPending = false;
     const remaining = Math.max(0, maxMovesForTeam(team) - gameState.movesUsedThisTurn);
-    const message = `${TEAM_NAMES[team]} moved ${direction < 0 ? "left" : "right"}${remaining ? ` (${remaining} move${remaining === 1 ? "" : "s"} left)` : ""}.`;
-    startMovementAnimation(team, fromX, tank.x, true, fromY, terrainAt(tank.x, gameState), "move");
+    const verb = movementType === "move" ? `moved ${direction < 0 ? "left" : "right"}` : movementType === "tunnel-exit" ? "drove out of a tunnel" : movementType === "tunnel-enter" ? "entered a tunnel" : "moved through a tunnel";
+    const message = `${TEAM_NAMES[team]} ${verb}${remaining ? ` (${remaining} move${remaining === 1 ? "" : "s"} left)` : ""}.`;
+    startMovementAnimation(team, fromX, tank.x, true, fromY, candidateY, movementType);
     playMoveSound();
     addEvent(message);
-    broadcastState(message, { team, fromX, toX: tank.x, fromY, toY: terrainAt(tank.x, gameState), type: "move" });
+    broadcastState(message, { team, fromX, toX: tank.x, fromY, toY: candidateY, type: movementType });
     updateGameUI(true);
     return true;
   }
@@ -2309,19 +2390,15 @@
       rejectGuestInput("Tunnel requires 2 credits.", team);
       return false;
     }
-    if (gameState.movesUsedThisTurn >= maxMovesForTeam(team)) {
-      rejectGuestInput("No movement allowance remains for tunnelling.", team);
-      return false;
-    }
 
     const tank = gameState.tanks[team];
-    const safeAngle = clamp(Number.isFinite(angle) ? angle : tank.angle, -85, 85);
-    const radians = tunnelWorldAngle(safeAngle) * Math.PI / 180;
+    const safeAngle = tunnelWorldAngle(Number.isFinite(angle) ? angle : tank.lastTunnelAngle || 0);
+    const radians = safeAngle * Math.PI / 180;
     const length = moveStep();
-    const radius = Math.max(tankWorldHeight(gameState) * 0.92, length * 0.22);
+    const radius = Math.max(tankWorldHeight(gameState) * .82, tankCollisionRadius(gameState) * .82);
     const startCenter = tankCenter(gameState, team);
-    const x1 = startCenter.x + Math.cos(radians) * tankWorldWidth(gameState) * 0.32;
-    const y1 = startCenter.y + Math.sin(radians) * tankWorldWidth(gameState) * 0.32;
+    const x1 = startCenter.x;
+    const y1 = startCenter.y;
     const x2 = startCenter.x + Math.cos(radians) * length;
     const y2 = startCenter.y + Math.sin(radians) * length;
     const minX = gameState.settings.worldWidth * 0.025;
@@ -2333,50 +2410,58 @@
     }
 
     let solidSamples = 0;
-    for (let i = 1; i <= 7; i += 1) {
-      const t = i / 7;
+    for (let i = 1; i <= 9; i += 1) {
+      const t = i / 9;
       const sx = x1 + (x2 - x1) * t;
       const sy = y1 + (y2 - y1) * t;
-      if (rawSolidAt(sx, sy, gameState)) solidSamples += 1;
+      if (naturalSolidAt(sx, sy, gameState)) solidSamples += 1;
     }
-    if (solidSamples < 3) {
-      rejectGuestInput("Aim into terrain beside the tank to tunnel.", team);
+    if (solidSamples < 2) {
+      rejectGuestInput("Aim through terrain beside the tank to tunnel.", team);
       return false;
     }
 
     const safeDistance = tankWorldWidth(gameState) * 1.15;
     const blocked = stateTeams(gameState).some(other => other !== team && gameState.tanks[other]?.alive && Math.hypot(x2 - gameState.tanks[other].x, y2 - tankCenter(gameState, other).y) < safeDistance);
     if (blocked) {
-      rejectGuestInput("Tunnel exit blocked by another tank.", team);
+      rejectGuestInput("Tunnel end blocked by another tank.", team);
       return false;
     }
 
-    const tunnel = { x1: round(x1, 2), y1: round(y1, 2), x2: round(x2, 2), y2: round(y2, 2), r: round(radius, 2), type: "tunnel" };
+    const id = `t${gameState.round}-${gameState.shotNumber}-${team}-${(gameState.tunnels?.length || 0)}`;
+    const tunnel = { id, x1: round(x1, 2), y1: round(y1, 2), x2: round(x2, 2), y2: round(y2, 2), r: round(radius, 2), type: "tunnel" };
     gameState.tunnels = Array.isArray(gameState.tunnels) ? gameState.tunnels : [];
     gameState.tunnels.push(tunnel);
     gameState.tunnels = gameState.tunnels.slice(-64);
     const fromX = tank.x;
     const fromY = tankBaseY(gameState, team);
     tank.x = round(x2, 3);
-    tank.tunnelY = round(y2 - tankWorldHeight(gameState) * 0.80, 3);
-    tank.angle = round(safeAngle, 1);
+    tank.lastTunnelAngle = round(safeAngle, 1);
+    if (naturalSolidAt(x2, y2, gameState)) {
+      tank.tunnelY = round(y2 - tankWorldHeight(gameState) * .80, 3);
+      tank.tunnelId = id;
+      tank.tunnelT = 1;
+    } else {
+      delete tank.tunnelY;
+      delete tank.tunnelId;
+      delete tank.tunnelT;
+    }
     gameState.credits[team] -= WEAPON_COSTS.tunnel;
-    // Tunnelling is a complete action-turn. Bigger Engine does not grant
-    // another move after a tunnel; a queued second turn still remains a
-    // separate turn under the existing Double Strike rules.
     gameState.movesUsedThisTurn = maxMovesForTeam(team);
     gameState.movedThisTurn = true;
     advanceTurnAfterShot(gameState, team, false);
     gameState.movesUsedThisTurn = 0;
     gameState.movedThisTurn = false;
     localInputPending = false;
-    const message = `${TEAM_NAMES[team]} tunnelled through the terrain for 2 credits. Their turn is over.`;
-    const movement = { team, fromX, toX: tank.x, fromY, toY: tank.tunnelY, type: "tunnel" };
-    startMovementAnimation(team, fromX, tank.x, true, fromY, tank.tunnelY, "tunnel");
+    const destinationY = tankBaseY(gameState, team);
+    const message = `${TEAM_NAMES[team]} tunnelled at ${formatTunnelAngle(safeAngle)} for 2 credits. Their turn is over.`;
+    const movement = { team, fromX, toX: tank.x, fromY, toY: destinationY, type: "tunnel" };
+    startMovementAnimation(team, fromX, tank.x, true, fromY, destinationY, "tunnel");
     playMoveSound();
     addEvent(message);
     if (role === "host") broadcastNetwork({ type: "state", state: compactStateMetadata(gameState), message, movement, tunnel });
     selectedWeapon = "standard";
+    configureAimControlForWeapon();
     updateGameUI(true);
     return true;
   }
@@ -2411,6 +2496,8 @@
       if (role === "guest") {
         localInputPending = true;
         sendNetwork({ type: "input", action: "tunnel", angle });
+        selectedWeapon = "standard";
+        configureAimControlForWeapon();
         updateGameControls();
       } else {
         authoritativeTunnel(localTeam(), angle);
@@ -2771,6 +2858,113 @@
       const py = tunnel.y1 + dy * t;
       return Math.hypot(x - px, y - py) <= tunnel.r;
     });
+  }
+
+  function naturalSolidAt(x, y, state = gameState) {
+    if (!state || x < 0 || x > state.settings.worldWidth) return false;
+    if (y <= terrainAt(x, state)) return true;
+    return Boolean(state.ceiling && y >= ceilingAt(x, state));
+  }
+
+  function tunnelById(id, state = gameState) {
+    return (Array.isArray(state?.tunnels) ? state.tunnels : []).find(tunnel => tunnel.id === id) || null;
+  }
+
+  function tunnelPoint(tunnel, t) {
+    const p = clamp(Number(t) || 0, 0, 1);
+    return { x: tunnel.x1 + (tunnel.x2 - tunnel.x1) * p, y: tunnel.y1 + (tunnel.y2 - tunnel.y1) * p };
+  }
+
+  function nearestTunnelLocation(x, y, state = gameState, maxDistance = Infinity) {
+    let best = null;
+    for (const tunnel of Array.isArray(state?.tunnels) ? state.tunnels : []) {
+      if (tunnel.type !== "tunnel") continue;
+      const dx = tunnel.x2 - tunnel.x1;
+      const dy = tunnel.y2 - tunnel.y1;
+      const lengthSq = dx * dx + dy * dy || 1;
+      const t = clamp(((x - tunnel.x1) * dx + (y - tunnel.y1) * dy) / lengthSq, 0, 1);
+      const point = tunnelPoint(tunnel, t);
+      const distance = Math.hypot(x - point.x, y - point.y);
+      if (distance <= Math.min(maxDistance, tunnel.r * 1.25) && (!best || distance < best.distance)) best = { tunnel, t, point, distance };
+    }
+    return best;
+  }
+
+  function tunnelEndpointOpen(tunnel, endpoint, state = gameState) {
+    const dx = tunnel.x2 - tunnel.x1;
+    const dy = tunnel.y2 - tunnel.y1;
+    const length = Math.hypot(dx, dy) || 1;
+    const sign = endpoint === 0 ? -1 : 1;
+    const point = endpoint === 0 ? { x: tunnel.x1, y: tunnel.y1 } : { x: tunnel.x2, y: tunnel.y2 };
+    const distance = tunnel.r + Math.max(.35, tankWorldHeight(state) * .25);
+    const sample = { x: point.x + dx / length * distance * sign, y: point.y + dy / length * distance * sign };
+    return !naturalSolidAt(sample.x, sample.y, state);
+  }
+
+  function connectedTunnelEnds(tunnel, endpoint, state = gameState) {
+    const point = endpoint === 0 ? { x: tunnel.x1, y: tunnel.y1 } : { x: tunnel.x2, y: tunnel.y2 };
+    const options = [];
+    for (const other of Array.isArray(state?.tunnels) ? state.tunnels : []) {
+      if (other === tunnel || other.type !== "tunnel") continue;
+      for (let end = 0; end < 2; end += 1) {
+        const otherPoint = end === 0 ? { x: other.x1, y: other.y1 } : { x: other.x2, y: other.y2 };
+        const distance = Math.hypot(point.x - otherPoint.x, point.y - otherPoint.y);
+        if (distance <= Math.max(tunnel.r, other.r) * 1.35) options.push({ tunnel: other, endpoint: end, distance });
+      }
+    }
+    return options;
+  }
+
+  function moveUndergroundTank(state, team, direction, distance) {
+    const tank = state.tanks[team];
+    const center = tankCenter(state, team);
+    let tunnel = tunnelById(tank.tunnelId, state);
+    let t = Number(tank.tunnelT);
+    if (!tunnel || !Number.isFinite(t)) {
+      const nearest = nearestTunnelLocation(center.x, center.y, state, tankWorldHeight(state) * 2.2);
+      if (!nearest) return null;
+      tunnel = nearest.tunnel;
+      t = nearest.t;
+    }
+    let remaining = Math.max(0, distance);
+    let guard = 0;
+    while (remaining > .001 && guard++ < 16) {
+      const dx = tunnel.x2 - tunnel.x1;
+      const dy = tunnel.y2 - tunnel.y1;
+      const length = Math.hypot(dx, dy) || 1;
+      const travelSign = Math.abs(dx) > .08 ? Math.sign(direction) * Math.sign(dx) : Math.sign(direction);
+      const endpoint = travelSign > 0 ? 1 : 0;
+      const available = travelSign > 0 ? (1 - t) * length : t * length;
+      if (remaining <= available + .001) {
+        t = clamp(t + travelSign * remaining / length, 0, 1);
+        remaining = 0;
+        break;
+      }
+      remaining -= available;
+      t = endpoint;
+      const joins = connectedTunnelEnds(tunnel, endpoint, state);
+      if (!joins.length) {
+        const point = tunnelPoint(tunnel, t);
+        if (tunnelEndpointOpen(tunnel, endpoint, state)) {
+          return { x: point.x, baseY: terrainAt(point.x, state), surface: true, tunnel: null, t: null };
+        }
+        return { blocked: true };
+      }
+      joins.sort((a, b) => {
+        const aOther = a.endpoint === 0 ? { x: a.tunnel.x2, y: a.tunnel.y2 } : { x: a.tunnel.x1, y: a.tunnel.y1 };
+        const bOther = b.endpoint === 0 ? { x: b.tunnel.x2, y: b.tunnel.y2 } : { x: b.tunnel.x1, y: b.tunnel.y1 };
+        const aScore = Math.sign(direction) * (aOther.x - tunnelPoint(tunnel, t).x);
+        const bScore = Math.sign(direction) * (bOther.x - tunnelPoint(tunnel, t).x);
+        return bScore - aScore || a.distance - b.distance;
+      });
+      tunnel = joins[0].tunnel;
+      t = joins[0].endpoint === 0 ? 0 : 1;
+    }
+    const point = tunnelPoint(tunnel, t);
+    if ((t <= .001 && tunnelEndpointOpen(tunnel, 0, state)) || (t >= .999 && tunnelEndpointOpen(tunnel, 1, state))) {
+      return { x: point.x, baseY: terrainAt(point.x, state), surface: true, tunnel: null, t: null };
+    }
+    return { x: point.x, baseY: point.y - tankWorldHeight(state) * .80, surface: false, tunnel, t };
   }
 
   function rawSolidAt(x, y, state = gameState, surface = "ground") {
@@ -3195,7 +3389,7 @@
 
   function purchaseInstruction(name) {
     const key = String(name || "").toLowerCase();
-    if (key.includes("tunnel")) return "Aim into terrain and press TUNNEL. It costs 2 credits and immediately ends your turn.";
+    if (key.includes("tunnel")) return "Set any tunnel angle, then press TUNNEL. It costs 2 credits and immediately ends your turn.";
     if (key.includes("parachute")) return "Fire it normally, then press Space again to open the parachute and drift down.";
     if (key.includes("bertha")) return "Arm it in the Armoury. It makes a large circular crater and costs the opponent a double turn.";
     if (key.includes("teleport")) return "Arm it, then click or touch the battlefield to move your tank there.";
@@ -3653,15 +3847,21 @@
     const point = canvasToWorld(clientX, clientY);
     const center = tankCenter(gameState, team);
     const dx = point.x - center.x;
-    const rise = Math.max(0.1, point.y - center.y);
-    const worldAngle = clamp(Math.atan2(rise, dx) * 180 / Math.PI, 5, 175);
-    const aim = clamp(90 - worldAngle, -85, 85);
-    const distance = Math.hypot(dx, rise);
-    const power = clamp(18 + distance / Math.max(1, gameState.settings.worldWidth * .58) * (MAX_POWER - 18), 18, MAX_POWER);
-    dom.angleInput.value = String(Math.round(aim));
-    dom.powerInput.value = String(Math.round(power));
-    gameState.tanks[team].angle = round(aim, 1);
-    gameState.tanks[team].power = round(power, 1);
+    const dy = point.y - center.y;
+    if (selectedWeapon === "tunnel") {
+      const tunnelAngle = tunnelWorldAngle(Math.atan2(dy, dx) * 180 / Math.PI);
+      dom.angleInput.value = String(Math.round(tunnelAngle));
+    } else {
+      const rise = Math.max(0.1, dy);
+      const worldAngle = clamp(Math.atan2(rise, dx) * 180 / Math.PI, 5, 175);
+      const aim = clamp(90 - worldAngle, -85, 85);
+      const distance = Math.hypot(dx, rise);
+      const power = clamp(18 + distance / Math.max(1, gameState.settings.worldWidth * .58) * (MAX_POWER - 18), 18, MAX_POWER);
+      dom.angleInput.value = String(Math.round(aim));
+      dom.powerInput.value = String(Math.round(power));
+      gameState.tanks[team].angle = round(aim, 1);
+      gameState.tanks[team].power = round(power, 1);
+    }
     updateAimOutputs();
     requestRender();
   }
@@ -4469,17 +4669,69 @@
     ctx.stroke();
   }
 
+  function tunnelLightLevels(tunnels, state = gameState) {
+    const nodes = [];
+    const index = new Map();
+    for (const tunnel of tunnels) {
+      if (tunnel.type !== "tunnel") continue;
+      for (let end = 0; end < 2; end += 1) {
+        const key = `${tunnel.id || tunnels.indexOf(tunnel)}:${end}`;
+        index.set(key, nodes.length);
+        nodes.push({ tunnel, end, distance: tunnelEndpointOpen(tunnel, end, state) ? 0 : Infinity });
+      }
+    }
+    const edges = Array.from({ length: nodes.length }, () => []);
+    for (let i = 0; i < nodes.length; i += 1) {
+      const a = nodes[i];
+      const mate = index.get(`${a.tunnel.id || tunnels.indexOf(a.tunnel)}:${a.end ? 0 : 1}`);
+      if (mate != null) edges[i].push([mate, Math.hypot(a.tunnel.x2 - a.tunnel.x1, a.tunnel.y2 - a.tunnel.y1)]);
+      const pointA = a.end ? { x: a.tunnel.x2, y: a.tunnel.y2 } : { x: a.tunnel.x1, y: a.tunnel.y1 };
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const b = nodes[j];
+        if (a.tunnel === b.tunnel) continue;
+        const pointB = b.end ? { x: b.tunnel.x2, y: b.tunnel.y2 } : { x: b.tunnel.x1, y: b.tunnel.y1 };
+        const d = Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+        if (d <= Math.max(a.tunnel.r, b.tunnel.r) * 1.35) {
+          edges[i].push([j, d]);
+          edges[j].push([i, d]);
+        }
+      }
+    }
+    const visited = new Set();
+    while (visited.size < nodes.length) {
+      let current = -1;
+      let best = Infinity;
+      for (let i = 0; i < nodes.length; i += 1) if (!visited.has(i) && nodes[i].distance < best) { best = nodes[i].distance; current = i; }
+      if (current < 0) break;
+      visited.add(current);
+      for (const [next, weight] of edges[current]) if (nodes[next].distance > best + weight) nodes[next].distance = best + weight;
+    }
+    const fade = Math.max(moveStep() * 2.8, 8);
+    const result = new Map();
+    for (const node of nodes) {
+      const key = node.tunnel.id || tunnels.indexOf(node.tunnel);
+      const pair = result.get(key) || [0, 0];
+      pair[node.end] = Number.isFinite(node.distance) ? Math.exp(-node.distance / fade) : 0;
+      result.set(key, pair);
+    }
+    return result;
+  }
+
   function drawExcavations() {
     const tunnels = Array.isArray(gameState?.tunnels) ? gameState.tunnels : [];
     if (!tunnels.length) return;
     const metrics = canvasMetrics();
+    const lighting = tunnelLightLevels(tunnels, gameState);
     ctx.save();
-    ctx.lineCap = "round";
     ctx.lineJoin = "round";
     for (const tunnel of tunnels) {
       const a = worldToCanvas(tunnel.x1, tunnel.y1);
       const b = worldToCanvas(tunnel.x2, tunnel.y2);
       const width = Math.max(3, tunnel.r * metrics.sy * 2);
+      const isTunnel = tunnel.type !== "blast";
+      const openA = isTunnel && tunnelEndpointOpen(tunnel, 0, gameState);
+      const openB = isTunnel && tunnelEndpointOpen(tunnel, 1, gameState);
+      ctx.lineCap = "butt";
       ctx.strokeStyle = "rgba(8,10,10,.92)";
       ctx.lineWidth = width + Math.max(2, width * .15);
       ctx.beginPath();
@@ -4489,9 +4741,23 @@
       ctx.strokeStyle = tunnel.type === "blast" ? "rgba(29,31,29,.98)" : "rgba(18,22,21,.98)";
       ctx.lineWidth = width;
       ctx.stroke();
-      ctx.strokeStyle = "rgba(120,113,91,.28)";
-      ctx.lineWidth = Math.max(1, width * .06);
-      ctx.stroke();
+      if (!openA) { ctx.beginPath(); ctx.arc(a.x, a.y, width / 2, 0, Math.PI * 2); ctx.fillStyle = tunnel.type === "blast" ? "rgba(29,31,29,.98)" : "rgba(18,22,21,.98)"; ctx.fill(); }
+      if (!openB) { ctx.beginPath(); ctx.arc(b.x, b.y, width / 2, 0, Math.PI * 2); ctx.fill(); }
+      ctx.strokeStyle = "rgba(120,113,91,.26)";
+      ctx.lineWidth = Math.max(1, width * .055);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      if (isTunnel) {
+        const levels = lighting.get(tunnel.id || tunnels.indexOf(tunnel)) || [0, 0];
+        if (levels[0] > .02 || levels[1] > .02) {
+          const gradient = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+          gradient.addColorStop(0, `rgba(232,214,158,${Math.min(.58, levels[0] * .58)})`);
+          gradient.addColorStop(.5, `rgba(180,162,118,${Math.min(.20, (levels[0] + levels[1]) * .10)})`);
+          gradient.addColorStop(1, `rgba(232,214,158,${Math.min(.58, levels[1] * .58)})`);
+          ctx.strokeStyle = gradient;
+          ctx.lineWidth = Math.max(2, width * .72);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+      }
     }
     ctx.restore();
   }
@@ -4943,6 +5209,40 @@
     if (!canLocalAct()) return;
     const team = localTeam();
     const angle = Number(dom.angleInput.value);
+    if (selectedWeapon === "tunnel") {
+      const center = tankCenter(gameState, team);
+      const radians = tunnelWorldAngle(angle) * Math.PI / 180;
+      const length = moveStep();
+      const end = { x: center.x + Math.cos(radians) * length, y: center.y + Math.sin(radians) * length };
+      const a = worldToCanvas(center.x, center.y);
+      const b = worldToCanvas(end.x, end.y);
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,221,112,.96)";
+      ctx.fillStyle = "rgba(255,231,150,.98)";
+      ctx.lineWidth = Math.max(2, dom.canvas.width / 620);
+      ctx.setLineDash([8, 5]);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = `800 ${Math.max(11, Math.min(16, dom.canvas.width / 78))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillStyle = "#fff0ad";
+      ctx.strokeStyle = "rgba(0,0,0,.78)";
+      ctx.lineWidth = 4;
+      const label = formatTunnelAngle(angle);
+      const lx = (a.x + b.x) / 2;
+      const ly = (a.y + b.y) / 2 - 7;
+      ctx.strokeText(label, lx, ly);
+      ctx.fillText(label, lx, ly);
+      ctx.restore();
+      return;
+    }
     const power = Number(dom.powerInput.value);
     const origin = muzzlePosition(gameState, team, angle);
     const radians = worldAngleForTeam(team, angle) * Math.PI / 180;
@@ -5322,7 +5622,7 @@
   }
 
   function updateAimOutputs() {
-    dom.angleOutput.textContent = formatAimAngle(dom.angleInput.value);
+    dom.angleOutput.textContent = selectedWeapon === "tunnel" ? formatTunnelAngle(dom.angleInput.value) : formatAimAngle(dom.angleInput.value);
     dom.powerOutput.textContent = dom.powerInput.value;
     requestRender();
   }
