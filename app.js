@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 21;
+  const APP_VERSION = 22;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -12,6 +12,7 @@
   const MAX_POWER = 200;
   const STANDARD_POWER = 80;
   const OFFSCREEN_RETURN_SECONDS = 5;
+  const TUNNEL_LENGTH_MULTIPLIER = 2;
   const WEAPON_COSTS = { tunnel: 2, parachute: 10, bigBertha: 10, teleport: 10, engine: 10, repair: 20 };
   const LOW_GRAVITY_TERRAIN_LIMIT = 3.75;
   const ACTIVE_FRAME_INTERVAL = 1000 / ACTIVE_RENDER_FPS;
@@ -2394,7 +2395,7 @@
     const tank = gameState.tanks[team];
     const safeAngle = tunnelWorldAngle(Number.isFinite(angle) ? angle : tank.lastTunnelAngle || 0);
     const radians = safeAngle * Math.PI / 180;
-    const length = moveStep();
+    const length = moveStep() * TUNNEL_LENGTH_MULTIPLIER;
     const radius = Math.max(tankWorldHeight(gameState) * .82, tankCollisionRadius(gameState) * .82);
     const startCenter = tankCenter(gameState, team);
     const x1 = startCenter.x;
@@ -2742,6 +2743,7 @@
     const origin = muzzlePosition(state, team, angle);
     const radians = worldAngleForTeam(team, angle) * Math.PI / 180;
     const speed = power * 0.60;
+    const projectileRadius = projectileCollisionRadius(state, options.weapon);
     let x = origin.x;
     let y = origin.y;
     let vx = Math.cos(radians) * speed;
@@ -2754,6 +2756,9 @@
     const deployTime = Number.isFinite(options.parachuteDeployTime) ? options.parachuteDeployTime : null;
     const trajectory = [{ x: round(x), y: round(y) }];
     const maxSteps = 9000;
+    const shooterCenter = tankCenter(state, team);
+    const shooterClearance = tankCollisionRadius(state) + projectileRadius + 0.08;
+    let shooterCleared = Math.hypot(x - shooterCenter.x, y - shooterCenter.y) > shooterClearance;
 
     for (let step = 0; step < maxSteps; step += 1) {
       elapsed += dt;
@@ -2771,15 +2776,53 @@
         vx += state.wind * 0.2 * dt;
         vy -= state.settings.gravity * dt;
       }
+
       const previousX = x;
       const previousY = y;
       x += vx * dt;
       y += vy * dt;
 
+      // Find every collision crossed during this simulation step and choose the
+      // earliest one. Terrain must therefore block tanks behind it, even at the
+      // highest shell speed or against a near-vertical cliff.
+      const candidates = [];
+      const groundImpact = segmentTerrainImpact(previousX, previousY, x, y, state, "ground", projectileRadius);
+      if (groundImpact) candidates.push({ ...groundImpact, type: "terrain", hitTeam: null });
+      if (state.ceiling) {
+        const roofImpact = segmentTerrainImpact(previousX, previousY, x, y, state, "ceiling", projectileRadius);
+        if (roofImpact) candidates.push({ ...roofImpact, type: "ceiling", hitTeam: null });
+      }
+
+      for (const checkedTeam of stateTeams(state)) {
+        if (!state.tanks[checkedTeam]?.alive) continue;
+        if (checkedTeam === team && !shooterCleared) continue;
+        const center = tankCenter(state, checkedTeam);
+        const hit = segmentCircleImpact(previousX, previousY, x, y, center.x, center.y, tankCollisionRadius(state) + projectileRadius);
+        if (hit) candidates.push({ ...hit, type: "tank", hitTeam: checkedTeam });
+      }
+
+      if (candidates.length) {
+        candidates.sort((a, b) => a.t - b.t);
+        const first = candidates[0];
+        if (recordTrajectory) trajectory.push({ x: round(first.x), y: round(first.y) });
+        return {
+          trajectory,
+          impact: { x: round(first.x), y: round(first.y), type: first.type },
+          hitTeam: first.hitTeam,
+          flightTime: elapsed - dt + dt * first.t,
+          parachuteDeployIndex
+        };
+      }
+
+      // The shooter can be hit by its own shell after the projectile has fully
+      // cleared the tank. This avoids a false collision at the muzzle while
+      // retaining genuine self-hits when a shot loops or blows back.
+      if (!shooterCleared && Math.hypot(x - shooterCenter.x, y - shooterCenter.y) > shooterClearance) shooterCleared = true;
+
       if (recordTrajectory && step % 2 === 0) trajectory.push({ x: round(x), y: round(y) });
 
-      // Horizontal exits are always lost. Above the visible sky is not a ceiling:
-      // the shell receives five simulated seconds to fall back into view.
+      // Horizontal exits are lost, but only after any terrain crossed on that
+      // same segment has had the opportunity to stop the shell.
       if (x < 0 || x > state.settings.worldWidth || y < -8) {
         if (recordTrajectory) trajectory.push({ x: round(x), y: round(y) });
         return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null, flightTime: elapsed, parachuteDeployIndex };
@@ -2789,52 +2832,6 @@
       if (aboveTopFor >= OFFSCREEN_RETURN_SECONDS) {
         if (recordTrajectory) trajectory.push({ x: round(x), y: round(y) });
         return { trajectory, impact: { x: round(x), y: round(y), type: "out" }, hitTeam: null, flightTime: elapsed, parachuteDeployIndex };
-      }
-
-      for (const checkedTeam of stateTeams(state)) {
-        if (checkedTeam === team && step < 14) continue;
-        const center = tankCenter(state, checkedTeam);
-        const radius = tankCollisionRadius(state);
-        const dx = x - center.x;
-        const dy = y - center.y;
-        if (dx * dx + dy * dy <= radius * radius) {
-          if (recordTrajectory) trajectory.push({ x: round(x), y: round(y) });
-          return {
-            trajectory,
-            impact: { x: round(x), y: round(y), type: "tank" },
-            hitTeam: checkedTeam,
-            flightTime: elapsed,
-            parachuteDeployIndex
-          };
-        }
-      }
-
-      if (step > 4) {
-        const groundImpact = segmentTerrainImpact(previousX, previousY, x, y, state, "ground");
-        if (groundImpact) {
-          if (recordTrajectory) trajectory.push({ x: round(groundImpact.x), y: round(groundImpact.y) });
-          return {
-            trajectory,
-            impact: { x: round(groundImpact.x), y: round(groundImpact.y), type: "terrain" },
-            hitTeam: null,
-            flightTime: elapsed,
-            parachuteDeployIndex
-          };
-        }
-
-        if (state.ceiling) {
-          const roofImpact = segmentTerrainImpact(previousX, previousY, x, y, state, "ceiling");
-          if (roofImpact) {
-            if (recordTrajectory) trajectory.push({ x: round(roofImpact.x), y: round(roofImpact.y) });
-            return {
-              trajectory,
-              impact: { x: round(roofImpact.x), y: round(roofImpact.y), type: "ceiling" },
-              hitTeam: null,
-              flightTime: elapsed,
-              parachuteDeployIndex
-            };
-          }
-        }
       }
 
       if (elapsed > 30) break;
@@ -2847,16 +2844,18 @@
     return Boolean(state && Number(state.settings?.gravity) <= LOW_GRAVITY_TERRAIN_LIMIT);
   }
 
-  function pointInsideExcavation(x, y, state = gameState) {
+  function pointInsideExcavation(x, y, state = gameState, clearance = 0) {
     const tunnels = Array.isArray(state?.tunnels) ? state.tunnels : [];
     return tunnels.some(tunnel => {
+      const usableRadius = Math.max(0, Number(tunnel.r || 0) - Math.max(0, clearance));
+      if (usableRadius <= 0) return false;
       const dx = tunnel.x2 - tunnel.x1;
       const dy = tunnel.y2 - tunnel.y1;
       const lengthSq = dx * dx + dy * dy || 1;
       const t = clamp(((x - tunnel.x1) * dx + (y - tunnel.y1) * dy) / lengthSq, 0, 1);
       const px = tunnel.x1 + dx * t;
       const py = tunnel.y1 + dy * t;
-      return Math.hypot(x - px, y - py) <= tunnel.r;
+      return Math.hypot(x - px, y - py) <= usableRadius;
     });
   }
 
@@ -2967,37 +2966,70 @@
     return { x: point.x, baseY: point.y - tankWorldHeight(state) * .80, surface: false, tunnel, t };
   }
 
-  function rawSolidAt(x, y, state = gameState, surface = "ground") {
-    if (!state || x < 0 || x > state.settings.worldWidth || pointInsideExcavation(x, y, state)) return false;
-    if (surface === "ceiling") return Boolean(state.ceiling && y >= ceilingAt(x, state));
-    return y <= terrainAt(x, state);
+  function projectileCollisionRadius(state = gameState, weapon = "standard") {
+    const base = Math.max(0.12, tankScale(state) * 0.30);
+    if (weapon === "bigBertha") return base * 1.65;
+    return base;
   }
 
-  function segmentTerrainImpact(x1, y1, x2, y2, state, surface) {
-    const samples = 12;
+  function rawSolidAt(x, y, state = gameState, surface = "ground", clearance = 0) {
+    if (!state || x < 0 || x > state.settings.worldWidth || pointInsideExcavation(x, y, state, clearance)) return false;
+    if (surface === "ceiling") return Boolean(state.ceiling && y + clearance >= ceilingAt(x, state));
+    return y - clearance <= terrainAt(x, state);
+  }
+
+  function segmentTerrainImpact(x1, y1, x2, y2, state, surface, clearance = 0) {
+    const distance = Math.hypot(x2 - x1, y2 - y1);
+    const terrainSpacing = state?.terrain?.length > 1 ? state.settings.worldWidth / (state.terrain.length - 1) : 0.25;
+    const samples = clamp(Math.ceil(distance / Math.max(0.035, Math.min(0.22, terrainSpacing * 0.65))), 12, 160);
     let priorT = 0;
-    let priorSolid = rawSolidAt(x1, y1, state, surface);
+    let priorSolid = rawSolidAt(x1, y1, state, surface, clearance);
+
+    // A muzzle already buried in a wall is a real immediate impact, not a
+    // reason to let the projectile escape through the back of that wall.
+    if (priorSolid) return { x: x1, y: y1, t: 0 };
+
     for (let i = 1; i <= samples; i += 1) {
       const t = i / samples;
       const sx = x1 + (x2 - x1) * t;
       const sy = y1 + (y2 - y1) * t;
-      const solid = rawSolidAt(sx, sy, state, surface);
+      const solid = rawSolidAt(sx, sy, state, surface, clearance);
       if (!priorSolid && solid) {
         let lo = priorT;
         let hi = t;
-        for (let n = 0; n < 14; n += 1) {
+        for (let n = 0; n < 18; n += 1) {
           const mid = (lo + hi) / 2;
           const mx = x1 + (x2 - x1) * mid;
           const my = y1 + (y2 - y1) * mid;
-          if (rawSolidAt(mx, my, state, surface)) hi = mid; else lo = mid;
+          if (rawSolidAt(mx, my, state, surface, clearance)) hi = mid; else lo = mid;
         }
         const hitT = (lo + hi) / 2;
-        return { x: x1 + (x2 - x1) * hitT, y: y1 + (y2 - y1) * hitT };
+        return { x: x1 + (x2 - x1) * hitT, y: y1 + (y2 - y1) * hitT, t: hitT };
       }
       priorSolid = solid;
       priorT = t;
     }
     return null;
+  }
+
+  function segmentCircleImpact(x1, y1, x2, y2, cx, cy, radius) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const fx = x1 - cx;
+    const fy = y1 - cy;
+    const a = dx * dx + dy * dy;
+    const c = fx * fx + fy * fy - radius * radius;
+    if (c <= 0) return { x: x1, y: y1, t: 0 };
+    if (a <= 1e-12) return null;
+    const b = 2 * (fx * dx + fy * dy);
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant < 0) return null;
+    const root = Math.sqrt(discriminant);
+    const t1 = (-b - root) / (2 * a);
+    const t2 = (-b + root) / (2 * a);
+    const t = t1 >= 0 && t1 <= 1 ? t1 : t2 >= 0 && t2 <= 1 ? t2 : null;
+    if (t === null) return null;
+    return { x: x1 + dx * t, y: y1 + dy * t, t };
   }
 
   function createBlastExcavation(state, impact, radius) {
@@ -3336,17 +3368,23 @@
     const dt = 0.075;
     let bestDistance = Infinity;
 
+    const projectileRadius = projectileCollisionRadius(gameState, "standard");
     for (let step = 0; step < 900; step += 1) {
       vx += gameState.wind * 0.2 * dt;
       vy -= gameState.settings.gravity * dt;
+      const previousX = x;
+      const previousY = y;
       x += vx * dt;
       y += vy * dt;
+      const groundImpact = segmentTerrainImpact(previousX, previousY, x, y, gameState, "ground", projectileRadius);
+      const roofImpact = gameState.ceiling ? segmentTerrainImpact(previousX, previousY, x, y, gameState, "ceiling", projectileRadius) : null;
+      const tankImpact = segmentCircleImpact(previousX, previousY, x, y, target.x, target.y, tankCollisionRadius() + projectileRadius);
+      const terrainT = Math.min(groundImpact?.t ?? Infinity, roofImpact?.t ?? Infinity);
+      if (tankImpact && tankImpact.t < terrainT) return 0;
+      if (groundImpact || roofImpact) break;
       const distance = Math.hypot(x - target.x, y - target.y);
       bestDistance = Math.min(bestDistance, distance);
-      if (distance <= tankCollisionRadius()) return 0;
       if (x < 0 || x > gameState.settings.worldWidth || y < -8) break;
-      if (step > 3 && y <= terrainAt(x, gameState)) break;
-      if (gameState.ceiling && step > 3 && y >= ceilingAt(x, gameState)) break;
     }
     return bestDistance;
   }
@@ -5212,7 +5250,7 @@
     if (selectedWeapon === "tunnel") {
       const center = tankCenter(gameState, team);
       const radians = tunnelWorldAngle(angle) * Math.PI / 180;
-      const length = moveStep();
+      const length = moveStep() * TUNNEL_LENGTH_MULTIPLIER;
       const end = { x: center.x + Math.cos(radians) * length, y: center.y + Math.sin(radians) * length };
       const a = worldToCanvas(center.x, center.y);
       const b = worldToCanvas(end.x, end.y);
