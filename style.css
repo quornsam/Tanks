@@ -2772,3 +2772,30 @@ body.game-active .fire-button {
   .range-step-button { width: 22px; min-width: 22px; padding: 0; }
   .fire-controls { grid-template-columns: 35px 54px; gap: 2px; width: 91px; }
 }
+
+/* v25.1 — fullscreen control strip keeps the responsive v25 grid.
+   Older fullscreen rules above used fixed columns and overrode the normal layout. */
+body.game-active #gameScreen:fullscreen .controls-panel {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) minmax(0, 1fr) max-content;
+  align-items: end;
+  column-gap: clamp(3px, 1vw, 18px);
+  row-gap: 0;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Safari/WebKit compatibility for the same fullscreen layout. */
+body.game-active #gameScreen:-webkit-full-screen .controls-panel {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) minmax(0, 1fr) max-content;
+  align-items: end;
+  column-gap: clamp(3px, 1vw, 18px);
+  row-gap: 0;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+}
