@@ -2547,205 +2547,228 @@ body.game-active .player-card-grid .hit-pip {
   .pass-turn-button { min-width: 35px; padding: 4px; font-size: .48rem; }
 }
 
-/* v24 — genuinely responsive one-row battle controls */
+/* v25 — rebuilt battle-control strip: isolated groups, fluid sliders, no overlap */
 .controls-panel,
+.controls-panel > *,
 .move-controls,
-.aim-control,
-.fire-controls,
 .move-command-row,
 .button-pair,
-.range-step-row {
+.aim-control,
+.range-step-row,
+.fire-controls {
   min-width: 0;
+  box-sizing: border-box;
 }
 
-/* Give fixed-action groups only the space they need; sliders absorb the resize. */
 body.game-active .controls-panel {
-  grid-template-columns:
-    minmax(104px, .78fr)
-    minmax(76px, 1fr)
-    minmax(76px, 1fr)
-    minmax(116px, .82fr);
-  gap: clamp(5px, .8vw, 10px);
+  display: grid;
+  grid-template-columns: max-content minmax(150px, 1fr) minmax(150px, 1fr) max-content;
+  align-items: end;
+  column-gap: clamp(10px, 1.15vw, 22px);
+  row-gap: 0;
+  padding: 12px 18px;
+  overflow: hidden;
 }
 
+.move-controls {
+  width: max-content;
+  align-self: end;
+}
+.move-controls > .control-title {
+  justify-content: flex-start;
+  white-space: nowrap;
+}
 .move-command-row {
-  grid-template-columns: minmax(0, 1fr) minmax(38px, auto);
-  gap: clamp(3px, .45vw, 5px);
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 8px;
 }
 .move-command-row .button-pair {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: clamp(2px, .4vw, 5px);
-  margin-top: 7px;
+  display: flex;
+  gap: 8px;
+  margin: 0;
 }
 .move-command-row .control-button,
 .pass-turn-button {
-  min-width: 0;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  padding: 0;
+  display: grid;
+  place-items: center;
 }
 .pass-turn-button {
-  width: 100%;
-  min-width: 38px;
-  padding-inline: 5px;
+  width: 68px;
+  min-width: 68px;
+  font-size: .66rem;
+}
+.move-controls small {
+  margin-top: 7px;
+  white-space: nowrap;
 }
 
+.aim-control {
+  display: grid;
+  grid-template-rows: auto 48px;
+  align-self: end;
+  gap: 8px;
+}
+.aim-control .control-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 12px;
+  min-height: 16px;
+  white-space: nowrap;
+  text-align: center;
+}
+.aim-control .control-title output {
+  flex: 0 0 auto;
+  min-width: 0;
+  text-align: left;
+}
 .range-step-row {
-  grid-template-columns:
-    clamp(21px, 2.35vw, 30px)
-    minmax(8px, 1fr)
-    clamp(21px, 2.35vw, 30px);
-  gap: clamp(2px, .45vw, 6px);
+  display: grid;
+  grid-template-columns: 48px minmax(28px, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
 }
 .range-step-button {
-  width: 100%;
-  min-width: 0;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  padding: 0;
+  display: grid;
+  place-items: center;
 }
 .range-step-row input[type="range"] {
   width: 100%;
-  min-width: 8px;
+  min-width: 28px;
+  margin: 0;
 }
 
-@media (max-width: 1100px) and (min-width: 721px) {
+.fire-controls {
+  display: grid;
+  grid-template-columns: 92px 144px;
+  align-items: stretch;
+  align-self: end;
+  gap: 10px;
+  width: max-content;
+}
+.double-strike-button,
+body.game-active .fire-button {
+  width: auto;
+  min-width: 0;
+  height: 48px;
+  min-height: 48px;
+  padding: 5px 10px;
+}
+.double-strike-button span { font-size: .60rem; }
+.double-strike-button small { display: none; }
+.fire-button span { font-size: .82rem; }
+.fire-button small { font-size: .55rem; }
+
+@media (max-width: 1400px) {
   body.game-active .controls-panel {
-    grid-template-columns:
-      minmax(98px, .82fr)
-      minmax(66px, 1fr)
-      minmax(66px, 1fr)
-      112px;
-    gap: clamp(4px, .65vw, 7px);
+    grid-template-columns: max-content minmax(110px, 1fr) minmax(110px, 1fr) max-content;
+    column-gap: clamp(7px, .8vw, 13px);
+    padding-inline: 12px;
   }
-  .move-command-row { grid-template-columns: minmax(0, 1fr) 38px; }
-  .pass-turn-button { min-width: 38px; padding-inline: 3px; }
+  .move-command-row { gap: 6px; }
+  .move-command-row .button-pair { gap: 6px; }
+  .move-command-row .control-button,
+  .range-step-button { width: 42px; min-width: 42px; height: 44px; }
+  .pass-turn-button { width: 58px; min-width: 58px; height: 44px; }
+  .aim-control { grid-template-rows: auto 44px; }
+  .range-step-row {
+    grid-template-columns: 42px minmax(20px, 1fr) 42px;
+    gap: 7px;
+    height: 44px;
+  }
+  .fire-controls { grid-template-columns: 76px 112px; gap: 7px; }
+  .double-strike-button,
+  body.game-active .fire-button { height: 44px; min-height: 44px; }
+}
+
+@media (max-width: 980px) {
+  body.game-active .controls-panel {
+    grid-template-columns: 132px minmax(72px, 1fr) minmax(72px, 1fr) 150px;
+    column-gap: 6px;
+    padding: 8px;
+  }
+  .move-controls { width: 132px; }
+  .move-command-row { gap: 4px; }
+  .move-command-row .button-pair { gap: 4px; }
+  .move-command-row .control-button { width: 38px; min-width: 38px; height: 40px; }
+  .pass-turn-button { width: 48px; min-width: 48px; height: 40px; font-size: .55rem; }
+  .move-controls small { font-size: .52rem; overflow: hidden; text-overflow: ellipsis; }
+  .aim-control { grid-template-rows: auto 40px; gap: 5px; }
+  .aim-control .control-title { gap: 6px; font-size: .57rem; }
+  .range-step-row {
+    grid-template-columns: 34px minmax(12px, 1fr) 34px;
+    gap: 4px;
+    height: 40px;
+  }
+  .range-step-button { width: 34px; min-width: 34px; height: 40px; }
+  .fire-controls { grid-template-columns: 58px 86px; gap: 6px; width: 150px; }
+  .double-strike-button,
+  body.game-active .fire-button { height: 40px; min-height: 40px; padding-inline: 4px; }
+  .double-strike-button span { font-size: .47rem; }
+  .fire-button span { font-size: .64rem; }
+  .fire-button small { font-size: .43rem; }
 }
 
 @media (max-width: 720px) {
   body.game-active .controls-panel {
-    grid-template-columns:
-      minmax(88px, .9fr)
-      minmax(50px, 1fr)
-      minmax(50px, 1fr)
-      90px;
-    gap: clamp(2px, 1vw, 4px);
-    padding-inline: clamp(3px, 1vw, 5px);
+    grid-template-columns: 104px minmax(48px, 1fr) minmax(48px, 1fr) 104px;
+    column-gap: 3px;
+    padding: 5px;
   }
-  .move-command-row {
-    grid-template-columns: minmax(0, 1fr) 34px;
-    gap: 2px;
-  }
+  .move-controls { width: 104px; }
+  .move-command-row { gap: 2px; margin-top: 5px; }
   .move-command-row .button-pair { gap: 2px; }
-  .move-command-row .control-button { padding-inline: 2px; }
-  .pass-turn-button {
-    min-width: 34px;
-    padding: 3px 2px;
-    font-size: .44rem;
-    letter-spacing: .025em;
+  .move-command-row .control-button { width: 30px; min-width: 30px; height: 34px; }
+  .pass-turn-button { width: 40px; min-width: 40px; height: 34px; padding: 0 2px; font-size: .46rem; }
+  .move-controls small { margin-top: 3px; font-size: .45rem; max-width: 104px; }
+  .control-title,
+  .aim-control .control-title { font-size: .48rem; letter-spacing: .065em; }
+  .aim-control { grid-template-rows: auto 34px; gap: 3px; }
+  .aim-control .control-title {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 1px;
+    line-height: 1;
   }
+  .aim-control .control-title output { text-align: center; }
   .range-step-row {
-    grid-template-columns: 19px minmax(8px, 1fr) 19px;
+    grid-template-columns: 26px minmax(6px, 1fr) 26px;
     gap: 2px;
+    height: 34px;
   }
-  .range-step-button {
-    width: 19px;
-    height: 22px;
-    font-size: .74rem;
-  }
+  .range-step-button { width: 26px; min-width: 26px; height: 34px; font-size: .8rem; }
+  .range-step-row input[type="range"] { min-width: 6px; }
+  .fire-controls { grid-template-columns: 40px 61px; gap: 3px; width: 104px; }
+  .double-strike-button,
+  body.game-active .fire-button { height: 34px; min-height: 34px; padding: 2px; }
+  .double-strike-button span { font-size: .38rem; line-height: .95; }
+  .fire-button span { font-size: .52rem; }
+  .fire-button small { display: none; }
 }
 
-@media (max-width: 390px) {
+@media (max-width: 430px) {
   body.game-active .controls-panel {
-    grid-template-columns:
-      minmax(82px, .9fr)
-      minmax(46px, 1fr)
-      minmax(46px, 1fr)
-      86px;
-    gap: 2px;
+    grid-template-columns: 92px minmax(40px, 1fr) minmax(40px, 1fr) 91px;
+    column-gap: 2px;
     padding-inline: 3px;
   }
-  .move-command-row { grid-template-columns: minmax(0, 1fr) 32px; }
-  .pass-turn-button { min-width: 32px; font-size: .41rem; }
-  .range-step-row {
-    grid-template-columns: 18px minmax(7px, 1fr) 18px;
-    gap: 1px;
-  }
-  .range-step-button { width: 18px; }
-  .fire-controls { grid-template-columns: 34px 49px; gap: 3px; }
-  body.game-active .fire-button { width: 49px; }
-  .double-strike-button { width: 34px; }
-}
-
-/* Align PASS with the arrow buttons; keep the full control group on one row. */
-.move-command-row { margin-top: 7px; }
-.move-command-row .button-pair { margin-top: 0; }
-
-/* Final v24 sizing: one fluid row at every viewport width. */
-body.game-active .controls-panel {
-  grid-template-columns:
-    clamp(88px, 16vw, 118px)
-    minmax(46px, 1fr)
-    minmax(46px, 1fr)
-    clamp(93px, 17vw, 124px);
-  gap: clamp(2px, .7vw, 8px);
-}
-.fire-controls > button,
-.move-command-row button,
-.range-step-row > * {
-  box-sizing: border-box;
-  max-width: 100%;
-}
-
-/* Browser-safe responsive fallback: compact base, wider action groups only when space exists. */
-body.game-active .controls-panel {
-  grid-template-columns: 88px minmax(46px, 1fr) minmax(46px, 1fr) 93px;
-  gap: 2px;
-}
-@media (min-width: 391px) {
-  body.game-active .controls-panel {
-    grid-template-columns: 98px minmax(46px, 1fr) minmax(46px, 1fr) 104px;
-    gap: 4px;
-  }
-}
-@media (min-width: 721px) {
-  body.game-active .controls-panel {
-    grid-template-columns: 110px minmax(58px, 1fr) minmax(58px, 1fr) 124px;
-    gap: 6px;
-  }
-}
-
-/* Narrowest screens: keep labels readable and firing buttons horizontal. */
-body.game-active .controls-panel {
-  grid-template-columns: 88px minmax(46px, 1fr) minmax(46px, 1fr) 100px;
-}
-.aim-control .control-title {
-  display: grid;
-  grid-template-columns: 1fr;
-  justify-items: center;
-  gap: 1px;
-  font-size: .46rem;
-  line-height: 1;
-  text-align: center;
-}
-.fire-controls {
-  grid-template-columns: 42px 55px;
-  gap: 3px;
-}
-body.game-active .fire-button { width: 55px; }
-.double-strike-button { width: 42px; }
-.double-strike-button span { font-size: .38rem; }
-
-@media (min-width: 391px) {
-  .aim-control .control-title {
-    display: flex;
-    grid-template-columns: none;
-    justify-items: normal;
-    justify-content: space-between;
-    font-size: .65rem;
-    line-height: normal;
-    text-align: left;
-  }
-  .fire-controls { grid-template-columns: 38px 63px; gap: 3px; }
-  body.game-active .fire-button { width: 63px; }
-  .double-strike-button { width: 38px; }
-}
-@media (min-width: 721px) {
-  .fire-controls { grid-template-columns: 46px 72px; gap: 5px; }
-  body.game-active .fire-button { width: 72px; }
-  .double-strike-button { width: 46px; }
+  .move-controls { width: 92px; }
+  .move-command-row .control-button { width: 27px; min-width: 27px; }
+  .pass-turn-button { width: 34px; min-width: 34px; font-size: .41rem; }
+  .move-controls small { max-width: 92px; }
+  .range-step-row { grid-template-columns: 22px minmax(4px, 1fr) 22px; gap: 1px; }
+  .range-step-button { width: 22px; min-width: 22px; padding: 0; }
+  .fire-controls { grid-template-columns: 35px 54px; gap: 2px; width: 91px; }
 }

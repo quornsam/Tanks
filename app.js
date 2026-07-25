@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 23;
+  const APP_VERSION = 25;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -254,6 +254,7 @@
   let doubleStrikeSelected = false;
   let selectedWeapon = "standard";
   let normalAimMemory = 45;
+  const aimSettingsMemory = Object.create(null);
   let activeCanvasMessageMode = null;
   let pendingArmAfterPurchase = null;
   let teleportMode = false;
@@ -821,24 +822,56 @@
     return `${angle}° ${arrow}`;
   }
 
+  function aimSettingsFor(team = localTeam()) {
+    const tank = gameState?.tanks?.[team];
+    if (!aimSettingsMemory[team]) {
+      aimSettingsMemory[team] = {
+        angle: clamp(Number(tank?.angle) || defaultAimForTeam(team), -85, 85),
+        power: clamp(Number(tank?.power) || STANDARD_POWER, 18, MAX_POWER),
+        tunnelAngle: Number.isFinite(Number(tank?.lastTunnelAngle)) ? tunnelWorldAngle(tank.lastTunnelAngle) : null
+      };
+    }
+    return aimSettingsMemory[team];
+  }
+
+  function rememberAimSettingsFromControls() {
+    if (!gameState || !dom.angleInput || !dom.powerInput) return;
+    const memory = aimSettingsFor(localTeam());
+    const angle = Number(dom.angleInput.value);
+    const power = Number(dom.powerInput.value);
+    if (selectedWeapon === "tunnel") {
+      if (Number.isFinite(angle)) memory.tunnelAngle = tunnelWorldAngle(angle);
+    } else if (Number.isFinite(angle)) {
+      memory.angle = clamp(angle, -85, 85);
+      normalAimMemory = memory.angle;
+    }
+    if (Number.isFinite(power)) memory.power = clamp(power, 18, MAX_POWER);
+  }
+
   function configureAimControlForWeapon() {
     if (!dom.angleInput || !gameState) return;
+    const memory = aimSettingsFor(localTeam());
     const tunnelMode = selectedWeapon === "tunnel";
     const previousMode = dom.angleInput.dataset.mode || "shot";
     if (tunnelMode && previousMode !== "tunnel") {
-      normalAimMemory = clamp(Number(dom.angleInput.value) || gameState.tanks?.[localTeam()]?.angle || 45, -85, 85);
+      const liveNormal = Number(dom.angleInput.value);
+      if (Number.isFinite(liveNormal)) memory.angle = clamp(liveNormal, -85, 85);
+      normalAimMemory = memory.angle;
       dom.angleInput.min = "-180";
       dom.angleInput.max = "180";
       dom.angleInput.step = "1";
-      const saved = Number(gameState.tanks?.[localTeam()]?.lastTunnelAngle);
-      dom.angleInput.value = String(Number.isFinite(saved) ? tunnelWorldAngle(saved) : normalAimMemory < 0 ? 180 : 0);
+      const saved = Number.isFinite(memory.tunnelAngle)
+        ? memory.tunnelAngle
+        : Number(gameState.tanks?.[localTeam()]?.lastTunnelAngle);
+      dom.angleInput.value = String(Number.isFinite(saved) ? tunnelWorldAngle(saved) : memory.angle < 0 ? 180 : 0);
       dom.angleInput.dataset.mode = "tunnel";
     } else if (!tunnelMode && previousMode === "tunnel") {
+      const liveTunnel = Number(dom.angleInput.value);
+      if (Number.isFinite(liveTunnel)) memory.tunnelAngle = tunnelWorldAngle(liveTunnel);
       dom.angleInput.min = "-85";
       dom.angleInput.max = "85";
       dom.angleInput.step = "1";
-      const fallback = Number(gameState.tanks?.[localTeam()]?.angle);
-      dom.angleInput.value = String(clamp(Number.isFinite(normalAimMemory) ? normalAimMemory : fallback || 45, -85, 85));
+      dom.angleInput.value = String(clamp(memory.angle, -85, 85));
       dom.angleInput.dataset.mode = "shot";
     } else if (!dom.angleInput.dataset.mode) {
       dom.angleInput.dataset.mode = tunnelMode ? "tunnel" : "shot";
@@ -1836,13 +1869,15 @@
     drawStatusTankPanels(performance.now());
 
     if (syncControls) {
-      const tank = tanks[localTeam()];
+      const team = localTeam();
+      const tank = tanks[team];
       if (tank) {
+        const memory = aimSettingsFor(team);
         configureAimControlForWeapon();
-        if (selectedWeapon !== "tunnel") dom.angleInput.value = tank.angle;
-        dom.powerInput.value = tank.power;
-        dom.angleOutput.textContent = selectedWeapon === "tunnel" ? formatTunnelAngle(dom.angleInput.value) : formatAimAngle(tank.angle);
-        dom.powerOutput.textContent = Math.round(tank.power);
+        if (selectedWeapon !== "tunnel") dom.angleInput.value = String(memory.angle);
+        dom.powerInput.value = String(memory.power);
+        dom.angleOutput.textContent = selectedWeapon === "tunnel" ? formatTunnelAngle(dom.angleInput.value) : formatAimAngle(memory.angle);
+        dom.powerOutput.textContent = String(Math.round(memory.power));
       }
     }
 
@@ -2627,6 +2662,11 @@
 
   function authoritativeFire(team, angle, power, doubleStrike = false, weapon = "standard") {
     if (!gameState || animation || movementAnimation || gameState.winner || gameState.turn !== team) return;
+    if (team === localTeam()) {
+      const memory = aimSettingsFor(team);
+      memory.angle = clamp(Number.isFinite(angle) ? angle : memory.angle, -85, 85);
+      memory.power = clamp(Number.isFinite(power) ? power : memory.power, 18, MAX_POWER);
+    }
     const safeWeapon = ["standard", "parachute", "bigBertha"].includes(weapon) ? weapon : "standard";
     if (safeWeapon !== "standard" && (gameState.inventory?.[team]?.[safeWeapon] || 0) < 1) {
       rejectGuestInput(`${TEAM_NAMES[team]} does not own that weapon.`, team);
@@ -3370,8 +3410,6 @@
         botTimer = null;
         if (!gameState || gameState.turn !== "red" || animation || gameState.winner) return;
         const aim = calculateBotAim();
-        dom.angleInput.value = aim.angle;
-        dom.powerInput.value = aim.power;
         const botWeapon = chooseBotWeapon();
         authoritativeFire("red", aim.angle, aim.power, botWeapon === "standard" && Math.random() < .18, botWeapon);
       }, 650);
@@ -5713,6 +5751,7 @@
   }
 
   function updateAimOutputs() {
+    rememberAimSettingsFromControls();
     dom.angleOutput.textContent = selectedWeapon === "tunnel" ? formatTunnelAngle(dom.angleInput.value) : formatAimAngle(dom.angleInput.value);
     dom.powerOutput.textContent = dom.powerInput.value;
     requestRender();
