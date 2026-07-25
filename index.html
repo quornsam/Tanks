@@ -174,9 +174,10 @@
         <div class="game-layout">
           <section class="battle-column">
             <div class="battle-hud">
-              <div class="tank-card blue-card">
+              <div id="blueTankCard" class="tank-card blue-card">
                 <div class="tank-card-title"><span class="team-swatch blue"></span><strong>BLUE</strong><span id="blueRoleLabel">HOST</span></div>
-                <div id="blueHits" class="hit-pips" aria-label="Blue tank damage"></div><span id="blueCredits" class="credit-readout">50 CR</span>
+                <div id="blueLoadout" class="team-loadout" aria-label="Blue purchases"><span class="loadout-empty">NO PURCHASES</span></div>
+                <div class="tank-card-status"><div id="blueHits" class="hit-pips" aria-label="Blue tank damage"></div><span id="blueCredits" class="credit-readout">0 CR</span></div>
               </div>
 
               <div class="turn-card">
@@ -189,9 +190,10 @@
                 </div>
               </div>
 
-              <div class="tank-card red-card">
+              <div id="redTankCard" class="tank-card red-card">
                 <div class="tank-card-title"><span id="redRoleLabel">GUEST</span><strong>RED</strong><span class="team-swatch red"></span></div>
-                <div id="redHits" class="hit-pips" aria-label="Red tank damage"></div><span id="redCredits" class="credit-readout">50 CR</span>
+                <div id="redLoadout" class="team-loadout" aria-label="Red purchases"><span class="loadout-empty">NO PURCHASES</span></div>
+                <div class="tank-card-status"><div id="redHits" class="hit-pips" aria-label="Red tank damage"></div><span id="redCredits" class="credit-readout">0 CR</span></div>
               </div>
             </div>
 
@@ -207,6 +209,7 @@
                     <button id="returnMenuButton" class="overlay-secondary">Return to menu</button>
                     <button id="replayAcceptButton" class="overlay-primary hidden">Accept</button>
                     <button id="replayDeclineButton" class="overlay-secondary hidden">Decline</button>
+                    <button id="purchaseConfirmButton" class="overlay-primary hidden">OK</button>
                   </div>
                 </div>
               </div>
@@ -228,15 +231,23 @@
                 <small id="moveStatus">Movement available</small>
               </div>
 
-              <label class="aim-control">
-                <span class="control-title"><span>◀ LEFT · RIGHT ▶</span><output id="angleOutput">R 45°</output></span>
-                <input id="angleInput" type="range" min="-85" max="85" step="1" value="45">
-              </label>
+              <div class="aim-control">
+                <span class="control-title"><span>ANGLE</span><output id="angleOutput">R 45°</output></span>
+                <div class="range-step-row">
+                  <button id="angleDecreaseButton" class="range-step-button" type="button" aria-label="Decrease angle">−</button>
+                  <input id="angleInput" type="range" min="-85" max="85" step="1" value="45" aria-label="Angle">
+                  <button id="angleIncreaseButton" class="range-step-button" type="button" aria-label="Increase angle">+</button>
+                </div>
+              </div>
 
-              <label class="aim-control">
-                <span class="control-title">POWER <output id="powerOutput">80</output></span>
-                <input id="powerInput" type="range" min="18" max="200" step="1" value="80">
-              </label>
+              <div class="aim-control">
+                <span class="control-title"><span>POWER</span><output id="powerOutput">80</output></span>
+                <div class="range-step-row">
+                  <button id="powerDecreaseButton" class="range-step-button" type="button" aria-label="Decrease power">−</button>
+                  <input id="powerInput" type="range" min="18" max="200" step="1" value="80" aria-label="Power">
+                  <button id="powerIncreaseButton" class="range-step-button" type="button" aria-label="Increase power">+</button>
+                </div>
+              </div>
 
               <div class="fire-controls">
                 <button id="doubleStrikeButton" class="double-strike-button" type="button" aria-pressed="false">
@@ -273,7 +284,7 @@
 
             <section class="panel compact-panel armoury-panel collapsible-panel" data-panel="armoury">
               <div class="panel-heading compact">
-                <div><p class="eyebrow">SUPPLY</p><h3>Armoury <span id="localCreditsLabel" class="inline-credits">50 CR</span></h3></div>
+                <div><p class="eyebrow">SUPPLY</p><h3>Armoury <span id="localCreditsLabel" class="inline-credits">0 CR</span></h3></div>
                 <div class="panel-heading-actions"><span id="armouryTeamBadge" class="mini-badge team-supply-badge">BLUE</span><button class="collapse-button" type="button" aria-label="Collapse armoury" title="Collapse panel">−</button></div>
               </div>
               <div class="panel-body">
@@ -357,6 +368,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

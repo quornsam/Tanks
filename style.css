@@ -1061,3 +1061,115 @@ body.game-active .telemetry-grid { min-width:0; max-width:100%; }
   body.game-active .side-column .armoury-panel:not(.collapsed) { max-height:calc(100dvh - 260px); }
   .armoury-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
+
+/* v12 — visible equipment, turn highlighting and compact precision controls */
+.tank-card {
+  border: 1px solid transparent;
+  transition: border-color .14s ease, box-shadow .14s ease, background-color .14s ease;
+}
+.tank-card.active-turn {
+  border-color: #65c97a;
+  background-color: rgba(25, 50, 35, .98);
+  box-shadow: 0 0 0 2px rgba(101, 201, 122, .22), 0 8px 24px rgba(0,0,0,.32);
+}
+.tank-card.active-turn .tank-card-title strong {
+  color: #a8f0b5;
+  text-shadow: 0 0 10px rgba(101,201,122,.28);
+}
+.tank-card-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+.red-card .tank-card-status { flex-direction: row-reverse; }
+.tank-card-status .hit-pips { min-width: 0; }
+.team-loadout {
+  min-height: 13px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.red-card .team-loadout { justify-content: flex-end; }
+.loadout-chip,
+.loadout-empty {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 2px;
+  color: #d8ddd9;
+  background: rgba(7,10,11,.56);
+  font-size: .43rem;
+  font-weight: 900;
+  letter-spacing: .035em;
+  line-height: 1.25;
+}
+.loadout-empty { color: #777f7d; border-color: transparent; background: transparent; padding-left: 0; }
+.loadout-chip.parachute { color: #d9e7df; }
+.loadout-chip.bertha { color: #e8bc79; }
+.loadout-chip.teleport { color: #b7b6ef; }
+.loadout-chip.engine { color: #8ed5a0; }
+.loadout-chip.repair { color: #e8e5dc; }
+
+.range-step-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.range-step-row input[type="range"] { min-width: 0; width: 100%; }
+.range-step-button {
+  width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #4a5559;
+  border-radius: 3px;
+  color: #e4e7e3;
+  background: #242b2d;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+}
+.range-step-button:hover:not(:disabled) { border-color: #788589; background: #30393c; }
+.range-step-button:disabled { opacity: .35; }
+
+.fire-controls,
+.fire-controls > button { min-width: 0; }
+.fire-controls > button { overflow: hidden; }
+.fire-button span,
+.double-strike-button span {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.05;
+}
+.fire-button span { padding-inline: 2px; font-size: clamp(.56rem, .72vw, .78rem); letter-spacing: .055em; }
+.fire-button small,
+.double-strike-button small { max-width: 100%; white-space: normal; line-height: 1.1; }
+.canvas-message[data-mode="purchase"] .canvas-dialog { width: min(410px, calc(100% - 32px)); }
+.canvas-message[data-mode="purchase"] .canvas-dialog > strong { font-size: clamp(1.15rem, 3vw, 1.8rem); }
+.canvas-message[data-mode="purchase"] .canvas-dialog > span { max-width: 32ch; text-align: center; }
+
+@media (max-height: 760px) {
+  .team-loadout { margin-top: 2px; min-height: 10px; }
+  .loadout-chip, .loadout-empty { font-size: .37rem; padding-top: 0; padding-bottom: 0; }
+  .range-step-row { grid-template-columns: 25px minmax(0, 1fr) 25px; gap: 3px; }
+  .range-step-button { width: 25px; height: 23px; font-size: .85rem; }
+}
+@media (max-width: 720px) {
+  .team-loadout { gap: 2px; }
+  .loadout-chip, .loadout-empty { font-size: .34rem; padding: 0 2px; }
+  .loadout-empty { display: none; }
+  .range-step-row { grid-template-columns: 23px minmax(0, 1fr) 23px; gap: 2px; }
+  .range-step-button { width: 23px; height: 22px; font-size: .78rem; }
+  .fire-button span { font-size: .48rem; letter-spacing: .025em; }
+}

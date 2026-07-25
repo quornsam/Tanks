@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 11;
+  const APP_VERSION = 12;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -69,8 +69,12 @@
     rulesSummary: $("rulesSummary"),
     lobbyLog: $("lobbyLog"),
     leaveLobbyButton: $("leaveLobbyButton"),
+    blueTankCard: $("blueTankCard"),
+    redTankCard: $("redTankCard"),
     blueRoleLabel: $("blueRoleLabel"),
     redRoleLabel: $("redRoleLabel"),
+    blueLoadout: $("blueLoadout"),
+    redLoadout: $("redLoadout"),
     blueHits: $("blueHits"),
     redHits: $("redHits"),
     blueCredits: $("blueCredits"),
@@ -91,6 +95,7 @@
     modalCloseButton: $("modalCloseButton"),
     replayAcceptButton: $("replayAcceptButton"),
     replayDeclineButton: $("replayDeclineButton"),
+    purchaseConfirmButton: $("purchaseConfirmButton"),
     canvasViewLabel: $("canvasViewLabel"),
     locatorButton: $("locatorButton"),
     fullscreenButton: $("fullscreenButton"),
@@ -99,8 +104,12 @@
     moveStatus: $("moveStatus"),
     angleInput: $("angleInput"),
     angleOutput: $("angleOutput"),
+    angleDecreaseButton: $("angleDecreaseButton"),
+    angleIncreaseButton: $("angleIncreaseButton"),
     powerInput: $("powerInput"),
     powerOutput: $("powerOutput"),
+    powerDecreaseButton: $("powerDecreaseButton"),
+    powerIncreaseButton: $("powerIncreaseButton"),
     fireButton: $("fireButton"),
     doubleStrikeButton: $("doubleStrikeButton"),
     armouryToolButton: $("armouryToolButton"),
@@ -178,6 +187,7 @@
   let winnerModalDismissed = false;
   let doubleStrikeSelected = false;
   let selectedWeapon = "standard";
+  let activeCanvasMessageMode = null;
   let pendingArmAfterPurchase = null;
   let teleportMode = false;
   let currentScreen = "home";
@@ -832,6 +842,8 @@
         if (data.message) {
           addEvent(data.message);
           if (/ moved /.test(` ${data.message} `)) playMoveSound();
+          const purchase = parsePurchaseMessage(data.message);
+          if (purchase) handlePurchaseFeedback(purchase.team, purchase.name, purchase.cost);
         }
         break;
 
@@ -993,7 +1005,7 @@
         blue: { x: round(spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: STANDARD_POWER },
         red: { x: round(spawnPositions.red, 3), hits: 0, alive: true, angle: -45, power: STANDARD_POWER }
       },
-      credits: { blue: 50, red: 50 },
+      credits: { blue: 0, red: 0 },
       inventory: {
         blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 },
         red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }
@@ -1243,6 +1255,7 @@
     movementAnimation = null;
     doubleStrikeSelected = false;
     selectedWeapon = "standard";
+    activeCanvasMessageMode = null;
     teleportMode = false;
     updateDoubleStrikeButton();
     updateArmouryUI();
@@ -1275,7 +1288,7 @@
   function normalizeGameState(state) {
     const incomingVersion = Number.isFinite(state.version) ? state.version : 8;
     if (!state.scores) state.scores = { blue: 0, red: 0 };
-    if (!state.credits) state.credits = { blue: 50, red: 50 };
+    if (!state.credits) state.credits = { blue: 0, red: 0 };
     if (!state.inventory) state.inventory = { blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }, red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 } };
     if (!state.upgrades) state.upgrades = { blue: { engine: false }, red: { engine: false } };
     for (const team of ["blue", "red"]) {
@@ -1337,6 +1350,10 @@
     dom.roundNumber.textContent = String(gameState.round);
     dom.blueCredits.textContent = `${gameState.credits.blue} CR`;
     dom.redCredits.textContent = `${gameState.credits.red} CR`;
+    dom.blueTankCard?.classList.toggle("active-turn", !gameState.winner && gameState.turn === "blue");
+    dom.redTankCard?.classList.toggle("active-turn", !gameState.winner && gameState.turn === "red");
+    updateTeamLoadout("blue");
+    updateTeamLoadout("red");
     updateArmouryUI();
     renderHitPips(dom.blueHits, tanks.blue.hits, settings.hitsToDestroy);
     renderHitPips(dom.redHits, tanks.red.hits, settings.hitsToDestroy);
@@ -1357,13 +1374,47 @@
         `Match score ${gameState.scores.blue}–${gameState.scores.red}`,
         "winner"
       );
-    } else if (!pendingActionRequest && !localActionRequest && !gameState.winner) {
+    } else if (!pendingActionRequest && !localActionRequest && !gameState.winner && activeCanvasMessageMode !== "purchase") {
       hideCanvasMessage();
     }
 
     if (role === "bot" && gameState.turn === "red" && !gameState.winner && !animation) scheduleBotTurn();
     invalidateStaticLayer();
     requestRender();
+  }
+
+  function updateTeamLoadout(team) {
+    if (!gameState) return;
+    const container = team === "blue" ? dom.blueLoadout : dom.redLoadout;
+    if (!container) return;
+    const inventory = gameState.inventory?.[team] || {};
+    const items = [];
+    const add = (label, count, className = "") => {
+      if (!count) return;
+      items.push({ label: count > 1 ? `${label}×${count}` : label, className });
+    };
+    add("PARA", inventory.parachute || 0, "parachute");
+    add("BERTHA", inventory.bigBertha || 0, "bertha");
+    add("TELE", inventory.teleport || 0, "teleport");
+    if (gameState.upgrades?.[team]?.engine) items.push({ label: "ENGINE✓", className: "engine" });
+    else add("ENGINE", inventory.engine || 0, "engine");
+    add("REPAIR", inventory.repair || 0, "repair");
+    container.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("span");
+      empty.className = "loadout-empty";
+      empty.textContent = "NO PURCHASES";
+      container.appendChild(empty);
+      container.setAttribute("aria-label", `${TEAM_NAMES[team]} has no purchased equipment`);
+      return;
+    }
+    for (const item of items) {
+      const chip = document.createElement("span");
+      chip.className = `loadout-chip ${item.className}`.trim();
+      chip.textContent = item.label;
+      container.appendChild(chip);
+    }
+    container.setAttribute("aria-label", `${TEAM_NAMES[team]} equipment: ${items.map(item => item.label).join(", ")}`);
   }
 
   function renderHitPips(container, hits, total) {
@@ -1393,10 +1444,14 @@
     dom.moveLeftButton.disabled = !moveAvailable;
     dom.moveRightButton.disabled = !moveAvailable;
     dom.angleInput.disabled = !enabled;
+    dom.angleDecreaseButton.disabled = !enabled;
+    dom.angleIncreaseButton.disabled = !enabled;
     dom.powerInput.disabled = !enabled;
+    dom.powerDecreaseButton.disabled = !enabled;
+    dom.powerIncreaseButton.disabled = !enabled;
     dom.fireButton.disabled = !(enabled || deployReady);
     dom.fireButton.classList.toggle("deploy-ready", deployReady);
-    dom.fireButton.querySelector("span").textContent = deployReady ? "DEPLOY" : selectedWeapon === "bigBertha" ? "FIRE BERTHA" : selectedWeapon === "parachute" ? "FIRE PARACHUTE" : selectedWeapon === "teleport" ? "PLACE" : "FIRE";
+    dom.fireButton.querySelector("span").textContent = deployReady ? "DEPLOY PARACHUTE" : selectedWeapon === "bigBertha" ? "BIG BERTHA" : selectedWeapon === "parachute" ? "PARACHUTE BOMB" : selectedWeapon === "teleport" ? "PLACE TANK" : "FIRE";
     dom.fireButton.querySelector("small").textContent = deployReady ? "Spacebar again" : "Spacebar";
     dom.doubleStrikeButton.disabled = !enabled || selectedWeapon !== "standard";
     dom.locatorButton.disabled = Boolean(animation || movementAnimation);
@@ -1436,7 +1491,7 @@
     const labels = {
       standard: "Standard shell armed",
       parachute: "Parachute bomb armed — Space launches, Space again deploys",
-      bigBertha: "Big Bertha armed — enormous terrain blast",
+      bigBertha: "Big Bertha armed — large circular terrain blast",
       teleport: "Teleport armed — click or touch a destination"
     };
     dom.weaponStatus.textContent = labels[selectedWeapon] || labels.standard;
@@ -1476,7 +1531,6 @@
     const team = localTeam();
     if (["parachute", "bigBertha", "teleport"].includes(item) && (gameState.inventory[team][item] || 0) > 0) {
       armWeapon(item);
-      playUiSound();
       return;
     }
     if (["engine", "repair"].includes(item) && (gameState.inventory[team][item] || 0) > 0) {
@@ -1523,7 +1577,7 @@
     if (announce) addEvent(message);
     broadcastState(message);
     updateGameUI(true);
-    playUiSound();
+    handlePurchaseFeedback(team, name, cost);
     return true;
   }
 
@@ -1682,7 +1736,6 @@
       dom.canvasFrame.classList.add("teleport-active");
       dom.weaponStatus.textContent = "Teleport armed — click or touch a destination on the battlefield";
       updateGameControls();
-      playUiSound();
       return;
     }
 
@@ -1725,7 +1778,6 @@
     } else {
       authoritativeDeployParachute(packet.shooter, progress);
     }
-    playUiSound();
   }
 
   function handleGuestInput(data) {
@@ -1790,8 +1842,8 @@
     if (result.hitTeam && !hitTeams.includes(result.hitTeam)) hitTeams.push(result.hitTeam);
 
     if (result.impact && result.impact.type !== "out") {
-      if (result.impact.type === "ceiling") applyCeilingCrater(resultingState, result.impact.x, blastRadius);
-      else applyCrater(resultingState, result.impact.x, result.impact.y, blastRadius);
+      if (result.impact.type === "ceiling") applyCeilingCrater(resultingState, result.impact.x, result.impact.y, blastRadius, weapon === "bigBertha" ? "circular" : "standard");
+      else applyCrater(resultingState, result.impact.x, result.impact.y, blastRadius, weapon === "bigBertha" ? "circular" : "standard");
     }
 
     for (const hitTeam of hitTeams) {
@@ -1882,7 +1934,7 @@
   }
 
   function shotBlastRadius(state, doubleStrike = false, weapon = "standard") {
-    if (weapon === "bigBertha") return craterRadius(state) * 20;
+    if (weapon === "bigBertha") return craterRadius(state) * 5;
     return craterRadius(state) * (doubleStrike ? 2 : 1);
   }
 
@@ -2062,7 +2114,7 @@
     return (terrainAt(x + delta, state) - terrainAt(x - delta, state)) / (delta * 2);
   }
 
-  function applyCrater(state, impactX, impactY, radius) {
+  function applyCrater(state, impactX, impactY, radius, shape = "standard") {
     const centerIndex = (impactX / state.settings.worldWidth) * (state.terrain.length - 1);
     const radiusIndex = Math.ceil((radius / state.settings.worldWidth) * state.terrain.length);
     for (let offset = -radiusIndex; offset <= radiusIndex; offset += 1) {
@@ -2071,15 +2123,21 @@
       const worldX = (index / (state.terrain.length - 1)) * state.settings.worldWidth;
       const distance = Math.abs(worldX - impactX);
       if (distance > radius) continue;
-      const normal = distance / radius;
-      const depth = radius * 0.72 * (1 - normal * normal);
-      const rim = radius * 0.12 * Math.exp(-((normal - 0.9) ** 2) / 0.02);
-      state.terrain[index] = round(clamp(state.terrain[index] - depth + rim, 3, WORLD_HEIGHT - 5), 3);
+      if (shape === "circular") {
+        const circleDepth = Math.sqrt(Math.max(0, radius * radius - distance * distance));
+        const circularSurface = impactY - circleDepth;
+        state.terrain[index] = round(clamp(Math.min(state.terrain[index], circularSurface), 3, WORLD_HEIGHT - 5), 3);
+      } else {
+        const normal = distance / radius;
+        const depth = radius * 0.72 * (1 - normal * normal);
+        const rim = radius * 0.12 * Math.exp(-((normal - 0.9) ** 2) / 0.02);
+        state.terrain[index] = round(clamp(state.terrain[index] - depth + rim, 3, WORLD_HEIGHT - 5), 3);
+      }
     }
-    smoothLocalTerrain(state.terrain, Math.round(centerIndex), radiusIndex + 2);
+    if (shape !== "circular") smoothLocalTerrain(state.terrain, Math.round(centerIndex), radiusIndex + 2);
   }
 
-  function applyCeilingCrater(state, impactX, radius) {
+  function applyCeilingCrater(state, impactX, impactY, radius, shape = "standard") {
     if (!state.ceiling) return;
     const centerIndex = (impactX / state.settings.worldWidth) * (state.ceiling.length - 1);
     const radiusIndex = Math.ceil((radius / state.settings.worldWidth) * state.ceiling.length);
@@ -2089,11 +2147,17 @@
       const worldX = index / (state.ceiling.length - 1) * state.settings.worldWidth;
       const distance = Math.abs(worldX - impactX);
       if (distance > radius) continue;
-      const normal = distance / radius;
-      const depth = radius * .62 * (1 - normal * normal);
-      state.ceiling[index] = round(clamp(state.ceiling[index] + depth, state.terrain[index] + 15, WORLD_HEIGHT - 2), 3);
+      if (shape === "circular") {
+        const circleDepth = Math.sqrt(Math.max(0, radius * radius - distance * distance));
+        const circularSurface = impactY + circleDepth;
+        state.ceiling[index] = round(clamp(Math.max(state.ceiling[index], circularSurface), state.terrain[index] + 15, WORLD_HEIGHT - 2), 3);
+      } else {
+        const normal = distance / radius;
+        const depth = radius * .62 * (1 - normal * normal);
+        state.ceiling[index] = round(clamp(state.ceiling[index] + depth, state.terrain[index] + 15, WORLD_HEIGHT - 2), 3);
+      }
     }
-    smoothLocalTerrain(state.ceiling, Math.round(centerIndex), radiusIndex + 2);
+    if (shape !== "circular") smoothLocalTerrain(state.ceiling, Math.round(centerIndex), radiusIndex + 2);
   }
 
   function smoothLocalTerrain(values, center, radius) {
@@ -2136,8 +2200,8 @@
       return;
     }
     if (packet.impact && packet.impact.type !== "out") {
-      if (packet.impact.type === "ceiling") applyCeilingCrater(nextState, packet.impact.x, packet.blastRadius);
-      else applyCrater(nextState, packet.impact.x, packet.impact.y, packet.blastRadius);
+      if (packet.impact.type === "ceiling") applyCeilingCrater(nextState, packet.impact.x, packet.impact.y, packet.blastRadius, packet.weapon === "bigBertha" ? "circular" : "standard");
+      else applyCrater(nextState, packet.impact.x, packet.impact.y, packet.blastRadius, packet.weapon === "bigBertha" ? "circular" : "standard");
     }
     gameState = nextState;
     animation = null;
@@ -2301,22 +2365,39 @@
     playOutgoingChatSound();
   }
 
+  function parsePurchaseMessage(message) {
+    const match = /^(Blue|Red) bought (.+) for (\d+) credits\.$/.exec(String(message || ""));
+    if (!match) return null;
+    return { team: match[1].toLowerCase(), name: match[2], cost: Number(match[3]) };
+  }
+
+  function handlePurchaseFeedback(team, name, cost) {
+    playPurchaseSound();
+    if (team !== localTeam() || dom.gameScreen.classList.contains("hidden")) return;
+    showCanvasMessage("PURCHASE CONFIRMED", `${name} added to the ${TEAM_NAMES[team]} armoury · ${cost} credits`, "purchase");
+  }
+
   function showCanvasMessage(message, subtitle = "", mode = "notice") {
+    activeCanvasMessageMode = mode;
+    dom.canvasMessage.dataset.mode = mode;
     dom.canvasMessageTitle.textContent = message;
     dom.canvasMessageSub.textContent = subtitle;
     dom.canvasMessageSub.classList.toggle("hidden", !subtitle);
-    const hasActions = mode === "winner" || mode === "request";
+    const hasActions = mode === "winner" || mode === "request" || mode === "purchase";
     dom.canvasMessageActions.classList.toggle("hidden", !hasActions);
-    dom.modalCloseButton.classList.toggle("hidden", mode !== "winner");
+    dom.modalCloseButton.classList.toggle("hidden", mode !== "winner" && mode !== "purchase");
     dom.replayRequestButton.classList.toggle("hidden", mode !== "winner");
     dom.returnMenuButton.classList.toggle("hidden", mode !== "winner");
     dom.replayAcceptButton.classList.toggle("hidden", mode !== "request");
     dom.replayDeclineButton.classList.toggle("hidden", mode !== "request");
+    dom.purchaseConfirmButton.classList.toggle("hidden", mode !== "purchase");
     dom.replayRequestButton.textContent = "Play again";
     dom.canvasMessage.classList.remove("hidden");
   }
 
   function hideCanvasMessage() {
+    activeCanvasMessageMode = null;
+    delete dom.canvasMessage.dataset.mode;
     dom.canvasMessage.classList.add("hidden");
     dom.canvasMessageActions.classList.add("hidden");
     dom.modalCloseButton.classList.add("hidden");
@@ -2324,6 +2405,12 @@
     dom.returnMenuButton.classList.add("hidden");
     dom.replayAcceptButton.classList.add("hidden");
     dom.replayDeclineButton.classList.add("hidden");
+    dom.purchaseConfirmButton.classList.add("hidden");
+  }
+
+  function closeCanvasModal() {
+    if (activeCanvasMessageMode === "winner") winnerModalDismissed = true;
+    hideCanvasMessage();
   }
 
   function dismissEndModal() {
@@ -2470,7 +2557,7 @@
       blue: { x: round(state.spawnPositions.blue, 3), hits: 0, alive: true, angle: 45, power: STANDARD_POWER },
       red: { x: round(state.spawnPositions.red, 3), hits: 0, alive: true, angle: -45, power: STANDARD_POWER }
     };
-    state.credits = { blue: 50, red: 50 };
+    state.credits = { blue: 0, red: 0 };
     state.inventory = { blue: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 }, red: { parachute: 0, bigBertha: 0, teleport: 0, engine: 0, repair: 0 } };
     state.upgrades = { blue: { engine: false }, red: { engine: false } };
     state.round = roundNumber;
@@ -2915,6 +3002,39 @@
 
   function playUiSound() {
     tone(460, .045, "triangle", .012);
+  }
+
+  function playPurchaseSound() {
+    tone(270, .055, "square", .026);
+    tone(540, .08, "triangle", .035, .045);
+    tone(810, .14, "triangle", .04, .115);
+    noiseBurst(.045, .012);
+  }
+
+  function playButtonClickSound(button) {
+    if (!button || button.disabled || !soundEnabled) return;
+    const id = button.id || "";
+    if (id === "fireButton" || id === "doubleStrikeButton") {
+      tone(118, .045, "square", .022);
+      tone(72, .07, "triangle", .018, .025);
+    } else if (id === "moveLeftButton" || id === "moveRightButton") {
+      tone(160, .035, "square", .017);
+      noiseBurst(.025, .006);
+    } else if (button.classList.contains("armoury-button") || id === "armouryToolButton") {
+      tone(310, .035, "square", .018);
+      tone(420, .045, "triangle", .014, .03);
+    } else if (button.classList.contains("range-step-button")) {
+      tone(id.includes("Increase") ? 610 : 520, .025, "square", .01);
+    } else if (button.classList.contains("collapse-button") || button.classList.contains("canvas-tool")) {
+      tone(390, .03, "triangle", .009);
+    } else if (button.classList.contains("danger-button") || id === "disconnectSessionButton" || id === "replayDeclineButton") {
+      tone(210, .045, "square", .015);
+    } else if (button.classList.contains("primary-button") || button.classList.contains("join-button") || id === "acceptButton" || id === "replayAcceptButton" || id === "purchaseConfirmButton") {
+      tone(440, .035, "triangle", .014);
+      tone(620, .05, "triangle", .012, .025);
+    } else {
+      playUiSound();
+    }
   }
 
   function playVictorySound() {
@@ -3708,7 +3828,7 @@
     ctx.restore();
 
     if (tank.hits > 0 && tank.alive) drawTankSmoke(turretPoint.x, turretPoint.y, tank.hits, now);
-    if (!tank.alive) drawDestroyedTank(turretPoint.x, turretPoint.y, accent, now);
+    if (!tank.alive) drawDestroyedTank(turretPoint.x, turretPoint.y, bodyWidth, bodyHeight, now);
   }
 
   function roundedRect(context, x, y, width, height, radius) {
@@ -3736,21 +3856,63 @@
     ctx.restore();
   }
 
-  function drawDestroyedTank(x, y, color, now) {
-    const pulse = .5 + Math.sin(now * .012) * .12;
+  function drawDestroyedTank(x, y, bodyWidth, bodyHeight, now) {
+    const scale = Math.max(0.7, Math.min(2.2, bodyWidth / 28));
     ctx.save();
-    ctx.globalAlpha = .75;
-    ctx.fillStyle = "#171717";
+
+    // Charred metal and soot remain over the original vehicle silhouette.
+    ctx.globalAlpha = .58;
+    ctx.fillStyle = "#090b0a";
     ctx.beginPath();
-    ctx.arc(x, y - 5, 26 + pulse * 8, 0, Math.PI * 2);
+    ctx.ellipse(x, y + bodyHeight * .18, Math.max(7, bodyWidth * .42), Math.max(3, bodyHeight * .34), -.08, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
+    ctx.globalAlpha = .82;
+    ctx.strokeStyle = "#0b0d0c";
+    ctx.lineWidth = Math.max(1.2, bodyHeight * .12);
     ctx.beginPath();
-    ctx.moveTo(x - 18, y - 28);
-    ctx.lineTo(x + 17, y + 8);
-    ctx.moveTo(x + 18, y - 28);
-    ctx.lineTo(x - 17, y + 8);
+    ctx.moveTo(x - bodyWidth * .32, y + bodyHeight * .12);
+    ctx.lineTo(x + bodyWidth * .28, y - bodyHeight * .11);
+    ctx.moveTo(x - bodyWidth * .20, y - bodyHeight * .18);
+    ctx.lineTo(x + bodyWidth * .35, y + bodyHeight * .18);
+    ctx.stroke();
+
+    // Dense black smoke plume. It is deliberately static while the turn is idle.
+    const smokeSeed = Math.floor(now / 900);
+    const random = mulberry32((gameState?.seed || 1) ^ smokeSeed ^ Math.round(x * 97));
+    for (let i = 0; i < 8; i += 1) {
+      const rise = i * (7 + scale * 2.5);
+      const drift = Math.sin(i * 1.7 + x * .03) * (3 + i * .8) + (random() - .5) * 4;
+      const radius = (5 + i * 1.7) * scale;
+      ctx.globalAlpha = Math.max(.12, .72 - i * .07);
+      ctx.fillStyle = i < 3 ? "#050606" : "#111414";
+      ctx.beginPath();
+      ctx.arc(x + drift, y - bodyHeight * .65 - rise, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Surrender flag, sized to remain visible even when tanks are tiny.
+    const poleX = x + Math.max(8, bodyWidth * .33);
+    const poleBottom = y - bodyHeight * .05;
+    const poleTop = poleBottom - Math.max(32, bodyHeight * 3.2);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#d7d4c9";
+    ctx.lineWidth = Math.max(1.2, bodyHeight * .08);
+    ctx.beginPath();
+    ctx.moveTo(poleX, poleBottom);
+    ctx.lineTo(poleX, poleTop);
+    ctx.stroke();
+    const flagW = Math.max(15, bodyWidth * .48);
+    const flagH = Math.max(9, bodyHeight * .72);
+    ctx.fillStyle = "#f1efe7";
+    ctx.strokeStyle = "#a8a69f";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(poleX, poleTop);
+    ctx.lineTo(poleX + flagW, poleTop + flagH * .18);
+    ctx.lineTo(poleX + flagW * .78, poleTop + flagH);
+    ctx.lineTo(poleX, poleTop + flagH * .78);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
     ctx.restore();
   }
@@ -4033,7 +4195,7 @@
     soundEnabled = !soundEnabled;
     dom.soundButton.classList.toggle("active", soundEnabled);
     dom.soundButton.textContent = soundEnabled ? "♪" : "×";
-    if (soundEnabled) playIncomingChatSound();
+    if (soundEnabled) playButtonClickSound(dom.soundButton);
   }
 
   function updateDoubleStrikeButton() {
@@ -4046,13 +4208,20 @@
     if (!canLocalAct() || selectedWeapon !== "standard") return;
     doubleStrikeSelected = !doubleStrikeSelected;
     updateDoubleStrikeButton();
-    playUiSound();
   }
 
   function updateAimOutputs() {
     dom.angleOutput.textContent = formatAimAngle(dom.angleInput.value);
     dom.powerOutput.textContent = dom.powerInput.value;
     requestRender();
+  }
+
+  function nudgeAimControl(input, delta) {
+    if (!input || input.disabled) return;
+    const min = Number(input.min);
+    const max = Number(input.max);
+    input.value = String(clamp(Number(input.value) + delta, min, max));
+    updateAimOutputs();
   }
 
   function keyboardControls(event) {
@@ -4089,7 +4258,11 @@
   dom.moveLeftButton.addEventListener("click", () => requestMove(-1));
   dom.moveRightButton.addEventListener("click", () => requestMove(1));
   dom.angleInput.addEventListener("input", updateAimOutputs);
+  dom.angleDecreaseButton.addEventListener("click", () => nudgeAimControl(dom.angleInput, -1));
+  dom.angleIncreaseButton.addEventListener("click", () => nudgeAimControl(dom.angleInput, 1));
   dom.powerInput.addEventListener("input", updateAimOutputs);
+  dom.powerDecreaseButton.addEventListener("click", () => nudgeAimControl(dom.powerInput, -5));
+  dom.powerIncreaseButton.addEventListener("click", () => nudgeAimControl(dom.powerInput, 5));
   dom.fireButton.addEventListener("click", requestFire);
   dom.doubleStrikeButton.addEventListener("click", toggleDoubleStrike);
   dom.standardWeaponButton.addEventListener("click", () => armWeapon("standard"));
@@ -4110,7 +4283,8 @@
   dom.changeWorldButton.addEventListener("click", requestWorldChange);
   dom.replayRequestButton.addEventListener("click", () => requestRoundAction("replay"));
   dom.returnMenuButton.addEventListener("click", returnToMenuPreservingSession);
-  dom.modalCloseButton.addEventListener("click", dismissEndModal);
+  dom.modalCloseButton.addEventListener("click", closeCanvasModal);
+  dom.purchaseConfirmButton.addEventListener("click", closeCanvasModal);
   dom.replayAcceptButton.addEventListener("click", acceptActionRequest);
   dom.replayDeclineButton.addEventListener("click", declineActionRequest);
   dom.leaveGameButton.addEventListener("click", returnToMenuPreservingSession);
@@ -4124,9 +4298,10 @@
   document.addEventListener("keydown", keyboardControls);
   document.addEventListener("fullscreenchange", updateFullscreenButton);
   document.addEventListener("pointerdown", ensureAudio, { once: true });
-  document.addEventListener("click", event => {
-    if (event.target.closest("button") && event.target !== dom.soundButton) playUiSound();
-  });
+  document.addEventListener("pointerdown", event => {
+    const button = event.target.closest("button");
+    if (button) playButtonClickSound(button);
+  }, true);
   dom.canvas.addEventListener("pointerdown", handleCanvasPointerDown);
   dom.canvas.addEventListener("pointermove", handleCanvasPointerMove);
   dom.canvas.addEventListener("pointerup", handleCanvasPointerUp);
