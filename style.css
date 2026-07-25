@@ -2519,3 +2519,30 @@ body.game-active .player-card-grid .hit-pip {
 
 /* v21 — true-angle tunnels, traversable underground routes and daylight */
 .canvas-frame.tunnel-aim-active canvas { cursor: crosshair; }
+
+
+/* v23 — responsive short-shot speed, tunnel-wall blast damage and pass turn */
+.move-command-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: stretch;
+}
+.move-command-row .button-pair { min-width: 0; }
+.pass-turn-button {
+  min-width: 42px;
+  padding: 5px 7px;
+  border: 1px solid rgba(207, 184, 105, .45);
+  border-radius: 7px;
+  color: #f1e5b7;
+  background: rgba(91, 72, 27, .48);
+  font-size: .55rem;
+  font-weight: 900;
+  letter-spacing: .045em;
+}
+.pass-turn-button:hover:not(:disabled) { background: rgba(124, 96, 31, .72); }
+.pass-turn-button:disabled { opacity: .38; cursor: not-allowed; }
+@media (max-width: 720px) {
+  .move-command-row { gap: 3px; }
+  .pass-turn-button { min-width: 35px; padding: 4px; font-size: .48rem; }
+}

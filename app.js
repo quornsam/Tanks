@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 22;
+  const APP_VERSION = 23;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -12,7 +12,7 @@
   const MAX_POWER = 200;
   const STANDARD_POWER = 80;
   const OFFSCREEN_RETURN_SECONDS = 5;
-  const TUNNEL_LENGTH_MULTIPLIER = 2;
+  const TUNNEL_LENGTH_MULTIPLIER = 3;
   const WEAPON_COSTS = { tunnel: 2, parachute: 10, bigBertha: 10, teleport: 10, engine: 10, repair: 20 };
   const LOW_GRAVITY_TERRAIN_LIMIT = 3.75;
   const ACTIVE_FRAME_INTERVAL = 1000 / ACTIVE_RENDER_FPS;
@@ -145,6 +145,7 @@
     roundOverReplayButton: $("roundOverReplayButton"),
     moveLeftButton: $("moveLeftButton"),
     moveRightButton: $("moveRightButton"),
+    passTurnButton: $("passTurnButton"),
     moveStatus: $("moveStatus"),
     angleInput: $("angleInput"),
     angleOutput: $("angleOutput"),
@@ -2051,6 +2052,7 @@
     const moveAvailable = enabled && movesRemaining > 0;
     dom.moveLeftButton.disabled = !moveAvailable;
     dom.moveRightButton.disabled = !moveAvailable;
+    if (dom.passTurnButton) dom.passTurnButton.disabled = !enabled;
     dom.angleInput.disabled = !enabled;
     dom.angleDecreaseButton.disabled = !enabled;
     dom.angleIncreaseButton.disabled = !enabled;
@@ -2486,6 +2488,39 @@
     );
   }
 
+  function authoritativePass(team) {
+    if (!gameState || animation || movementAnimation || gameState.winner || gameState.turn !== team) return false;
+    advanceTurnAfterShot(gameState, team, false);
+    gameState.movesUsedThisTurn = 0;
+    gameState.movedThisTurn = false;
+    gameState.wind = randomWind(gameState.settings);
+    localInputPending = false;
+    const message = `${playerLabel(team)} passed the turn.`;
+    addEvent(message);
+    if (role === "host") broadcastNetwork({ type: "state", state: compactStateMetadata(gameState), message });
+    playTurnSound(gameState.turn);
+    updateGameUI(true);
+    return true;
+  }
+
+  function requestPassTurn() {
+    if (!canLocalAct()) return;
+    const team = localTeam();
+    selectedWeapon = "standard";
+    doubleStrikeSelected = false;
+    teleportMode = false;
+    dom.canvasFrame.classList.remove("teleport-active");
+    configureAimControlForWeapon();
+    updateDoubleStrikeButton();
+    if (role === "guest") {
+      localInputPending = true;
+      sendNetwork({ type: "input", action: "pass" });
+      updateGameControls();
+    } else {
+      authoritativePass(team);
+    }
+  }
+
   function requestFire() {
     if (canDeployParachute()) {
       requestParachuteDeploy();
@@ -2574,6 +2609,8 @@
     }
     if (data.action === "move") {
       authoritativeMove(team, Number(data.direction));
+    } else if (data.action === "pass") {
+      authoritativePass(team);
     } else if (data.action === "tunnel") {
       authoritativeTunnel(team, Number(data.angle));
     } else if (data.action === "fire") {
@@ -2620,7 +2657,9 @@
 
     let excavation = null;
     if (result.impact && result.impact.type !== "out") {
-      if (lowGravityTerrain(resultingState) && ["terrain", "ceiling"].includes(result.impact.type)) {
+      const tunnelImpact = ["terrain", "ceiling"].includes(result.impact.type)
+        && impactTouchesExcavation(baseState, result.impact, projectileCollisionRadius(baseState, weapon) + 0.22);
+      if (tunnelImpact || (lowGravityTerrain(resultingState) && ["terrain", "ceiling"].includes(result.impact.type))) {
         excavation = createBlastExcavation(resultingState, result.impact, blastRadius);
         resultingState.tunnels = Array.isArray(resultingState.tunnels) ? resultingState.tunnels : [];
         resultingState.tunnels.push(excavation);
@@ -2692,7 +2731,7 @@
   function replaceShotAnimation(packet) {
     const deployIndex = Math.max(1, Number(packet.parachuteDeployIndex) || 1);
     const progress = clamp(deployIndex / Math.max(1, packet.trajectory.length - 1), 0, 0.96);
-    const travelDuration = clamp(packet.trajectory.length * 9.5, 1050, 5200);
+    const travelDuration = clamp(packet.trajectory.length * 9.5, 220, 5200);
     animation = {
       packet,
       start: performance.now() - progress * travelDuration,
@@ -3032,6 +3071,20 @@
     return { x: x1 + dx * t, y: y1 + dy * t, t };
   }
 
+  function impactTouchesExcavation(state, impact, margin = 0) {
+    if (!state || !impact || !Number.isFinite(impact.x) || !Number.isFinite(impact.y)) return false;
+    for (const excavation of Array.isArray(state.tunnels) ? state.tunnels : []) {
+      const dx = excavation.x2 - excavation.x1;
+      const dy = excavation.y2 - excavation.y1;
+      const lengthSq = dx * dx + dy * dy || 1;
+      const t = clamp(((impact.x - excavation.x1) * dx + (impact.y - excavation.y1) * dy) / lengthSq, 0, 1);
+      const px = excavation.x1 + dx * t;
+      const py = excavation.y1 + dy * t;
+      if (Math.hypot(impact.x - px, impact.y - py) <= Number(excavation.r || 0) + Math.max(0, margin)) return true;
+    }
+    return false;
+  }
+
   function createBlastExcavation(state, impact, radius) {
     return {
       x1: round(impact.x, 2), y1: round(impact.y, 2),
@@ -3183,7 +3236,7 @@
         ? clamp(560 + Math.abs(packet.power - fromPower) * 2.4, 650, 1050)
         : 420,
       recoilDuration: 680,
-      travelDuration: clamp(packet.trajectory.length * 11.5, 1350, 6200),
+      travelDuration: clamp(packet.trajectory.length * 11.5, 220, 6200),
       explosionDuration: packet.impact && packet.impact.type !== "out" ? (packet.weapon === "bigBertha" ? 1100 : 720) : 220,
       phase: "aim",
       fireSoundPlayed: false,
@@ -4156,7 +4209,7 @@
     if (id === "fireButton" || id === "doubleStrikeButton") {
       tone(118, .045, "square", .022);
       tone(72, .07, "triangle", .018, .025);
-    } else if (id === "moveLeftButton" || id === "moveRightButton") {
+    } else if (id === "moveLeftButton" || id === "moveRightButton" || id === "passTurnButton") {
       tone(160, .035, "square", .017);
       noiseBurst(.025, .006);
     } else if (button.classList.contains("armoury-button") || id === "armouryToolButton") {
@@ -5685,6 +5738,9 @@
     } else if (event.key === " " || event.code === "Space") {
       event.preventDefault();
       requestFire();
+    } else if (event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      requestPassTurn();
     }
   }
 
@@ -5707,6 +5763,7 @@
   dom.leaveLobbyButton.addEventListener("click", resetAll);
   dom.moveLeftButton.addEventListener("click", () => requestMove(-1));
   dom.moveRightButton.addEventListener("click", () => requestMove(1));
+  dom.passTurnButton.addEventListener("click", requestPassTurn);
   dom.angleInput.addEventListener("input", updateAimOutputs);
   dom.angleDecreaseButton.addEventListener("click", () => nudgeAimControl(dom.angleInput, -1));
   dom.angleIncreaseButton.addEventListener("click", () => nudgeAimControl(dom.angleInput, 1));
