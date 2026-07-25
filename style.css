@@ -1173,3 +1173,104 @@ body.game-active .telemetry-grid { min-width:0; max-width:100%; }
   .range-step-button { width: 23px; height: 22px; font-size: .78rem; }
   .fire-button span { font-size: .48rem; letter-spacing: .025em; }
 }
+
+/* v13 — illustrated logo, compact strike control, persistent replay and staged cannon fire */
+.topbar {
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
+}
+.brand-lockup {
+  min-width: 0;
+  justify-items: start;
+}
+.brand-logo {
+  display: block;
+  width: clamp(245px, 24vw, 330px);
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  object-position: left center;
+  filter: drop-shadow(0 3px 9px rgba(0,0,0,.38));
+}
+body.game-active .brand-lockup {
+  padding-left: 4px;
+  padding-right: 8px;
+}
+body.game-active .brand-logo {
+  width: clamp(145px, 14vw, 190px);
+  max-height: 48px;
+}
+
+.round-over-dock {
+  position: absolute;
+  z-index: 11;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 7px 8px 7px 11px;
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 7px;
+  background: rgba(8,13,22,.9);
+  box-shadow: 0 8px 24px rgba(0,0,0,.38);
+  backdrop-filter: blur(7px);
+}
+.round-over-dock strong {
+  white-space: nowrap;
+  color: #dbe5ef;
+  font-size: .62rem;
+  letter-spacing: .11em;
+}
+.round-over-dock button {
+  min-width: 0;
+  padding: 7px 11px;
+  border: 1px solid #78d59e;
+  border-radius: 4px;
+  color: #092417;
+  background: #69e29b;
+  font-size: .64rem;
+  font-weight: 950;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+
+@media (min-width: 721px) {
+  .fire-controls {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 6px;
+  }
+}
+.double-strike-button {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 3px;
+}
+.double-strike-button span {
+  font-size: .57rem;
+  line-height: 1.02;
+  letter-spacing: .025em;
+  white-space: normal;
+}
+.double-strike-button small {
+  margin-top: 2px;
+  font-size: .42rem;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .topbar { padding-left: 7px; padding-right: 7px; }
+  .brand-logo { width: min(210px, 58vw); }
+  body.game-active .brand-logo { width: min(142px, 42vw); max-height: 38px; }
+  .round-over-dock { bottom: 7px; gap: 6px; padding: 5px 6px 5px 8px; }
+  .round-over-dock strong { font-size: .52rem; }
+  .round-over-dock button { padding: 6px 8px; font-size: .54rem; }
+}
+
+@media (max-height: 720px) {
+  body.game-active .brand-logo { width: 145px; max-height: 37px; }
+  .round-over-dock { bottom: 6px; }
+}

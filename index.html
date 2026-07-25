@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v11</title>
-  <link rel="stylesheet" href="style.css?v=11">
+  <title>Red vs Blue — P2P Tanks v13</title>
+  <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
   <div id="app" class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
         <span class="brand-kicker">PEER-TO-PEER ARTILLERY</span>
-        <h1><span class="brand-red">RED</span> <span class="brand-vs">vs</span> <span class="brand-blue">BLUE</span><span class="brand-tank" aria-hidden="true"><i></i><b></b></span></h1>
+        <img class="brand-logo" src="red-vs-blue-logo.png?v=13" alt="Red vs Blue tank battle">
       </div>
       <div id="connectionPill" class="connection-pill offline">
         <span class="connection-dot"></span>
@@ -219,6 +219,10 @@
               <button id="soundButton" class="canvas-tool sound-tool active" title="Toggle sound" aria-label="Toggle sound">♪</button>
               <button id="locatorButton" class="canvas-tool locator-tool" title="Inspect terrain" aria-label="Inspect terrain">⌖</button>
               <button id="fullscreenButton" class="canvas-tool" title="Full screen" aria-label="Full screen">⛶</button>
+              <div id="roundOverDock" class="round-over-dock hidden" aria-live="polite">
+                <strong>ROUND OVER</strong>
+                <button id="roundOverReplayButton" type="button">PLAY AGAIN</button>
+              </div>
             </div>
 
             <div class="controls-panel">
@@ -251,8 +255,8 @@
 
               <div class="fire-controls">
                 <button id="doubleStrikeButton" class="double-strike-button" type="button" aria-pressed="false">
-                  <span>DOUBLE STRIKE</span>
-                  <small>2× blast · opponent may get two turns</small>
+                  <span>DOUBLE<br>STRIKE</span>
+                  <small>2× BLAST</small>
                 </button>
                 <button id="fireButton" class="fire-button">
                   <span>FIRE</span>
@@ -368,6 +372,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

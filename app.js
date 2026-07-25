@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 12;
+  const APP_VERSION = 13;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -99,6 +99,8 @@
     canvasViewLabel: $("canvasViewLabel"),
     locatorButton: $("locatorButton"),
     fullscreenButton: $("fullscreenButton"),
+    roundOverDock: $("roundOverDock"),
+    roundOverReplayButton: $("roundOverReplayButton"),
     moveLeftButton: $("moveLeftButton"),
     moveRightButton: $("moveRightButton"),
     moveStatus: $("moveStatus"),
@@ -1378,6 +1380,7 @@
       hideCanvasMessage();
     }
 
+    updateRoundOverDock();
     if (role === "bot" && gameState.turn === "red" && !gameState.winner && !animation) scheduleBotTurn();
     invalidateStaticLayer();
     requestRender();
@@ -1904,7 +1907,7 @@
   function replaceShotAnimation(packet) {
     const deployIndex = Math.max(1, Number(packet.parachuteDeployIndex) || 1);
     const progress = clamp(deployIndex / Math.max(1, packet.trajectory.length - 1), 0, 0.96);
-    const travelDuration = clamp(packet.trajectory.length * 7.5, 700, 4200);
+    const travelDuration = clamp(packet.trajectory.length * 9.5, 1050, 5200);
     animation = {
       packet,
       start: performance.now() - progress * travelDuration,
@@ -2171,22 +2174,40 @@
     if (!packet || !Array.isArray(packet.trajectory) || packet.trajectory.length < 2) return;
     resetInspectionView(false);
     localInputPending = false;
+    const now = performance.now();
+    const currentTank = gameState?.tanks?.[packet.shooter];
+    const fromAngle = Number.isFinite(currentTank?.angle) ? currentTank.angle : packet.angle;
+    const fromPower = Number.isFinite(currentTank?.power) ? currentTank.power : packet.power;
     animation = {
       packet,
-      start: performance.now(),
-      travelDuration: clamp(packet.trajectory.length * 7.5, 700, 4200),
-      explosionDuration: packet.impact && packet.impact.type !== "out" ? (packet.weapon === "bigBertha" ? 1100 : 620) : 180,
-      phase: "travel"
+      start: now,
+      phaseStart: now,
+      fromAngle,
+      fromPower,
+      aimDuration: Math.abs(packet.angle - fromAngle) > 0.5 ? 620 : 260,
+      chargeDuration: Math.abs(packet.power - fromPower) > 0.5 ? 520 : 340,
+      recoilDuration: 470,
+      travelDuration: clamp(packet.trajectory.length * 9.5, 1050, 5200),
+      explosionDuration: packet.impact && packet.impact.type !== "out" ? (packet.weapon === "bigBertha" ? 1100 : 720) : 220,
+      phase: "aim",
+      fireSoundPlayed: false
     };
-    playFireSound();
     const weaponText = packet.weapon && packet.weapon !== "standard" ? ` ${weaponLabel(packet.weapon)}` : packet.doubleStrike ? " a DOUBLE STRIKE" : "";
-    addEvent(`${TEAM_NAMES[packet.shooter]} fired${weaponText} ${formatAimAngle(packet.angle)} with power ${Math.round(packet.power)}.`);
+    addEvent(`${TEAM_NAMES[packet.shooter]} prepared${weaponText}: ${formatAimAngle(packet.angle)}, power ${Math.round(packet.power)}.`);
     updateGameControls();
     requestRender();
+  }
+
+  function beginTravelPhase(now) {
+    if (!animation) return;
+    const packet = animation.packet;
+    animation.phase = "travel";
+    animation.phaseStart = now;
+    animation.start = now;
     if (role === "bot" && packet.shooter === "red" && packet.weapon === "parachute" && !packet.parachuteDeployed) {
       setTimeout(() => {
         if (animation?.packet === packet && animation.phase === "travel") authoritativeDeployParachute("red", .52);
-      }, 520);
+      }, 620);
     }
   }
 
@@ -2377,8 +2398,21 @@
     showCanvasMessage("PURCHASE CONFIRMED", `${name} added to the ${TEAM_NAMES[team]} armoury · ${cost} credits`, "purchase");
   }
 
+  function updateRoundOverDock() {
+    if (!dom.roundOverDock) return;
+    const visible = Boolean(
+      gameState?.winner &&
+      winnerModalDismissed &&
+      !pendingActionRequest &&
+      !localActionRequest &&
+      activeCanvasMessageMode === null
+    );
+    dom.roundOverDock.classList.toggle("hidden", !visible);
+  }
+
   function showCanvasMessage(message, subtitle = "", mode = "notice") {
     activeCanvasMessageMode = mode;
+    updateRoundOverDock();
     dom.canvasMessage.dataset.mode = mode;
     dom.canvasMessageTitle.textContent = message;
     dom.canvasMessageSub.textContent = subtitle;
@@ -2406,6 +2440,7 @@
     dom.replayAcceptButton.classList.add("hidden");
     dom.replayDeclineButton.classList.add("hidden");
     dom.purchaseConfirmButton.classList.add("hidden");
+    updateRoundOverDock();
   }
 
   function closeCanvasModal() {
@@ -3601,11 +3636,47 @@
     ctx.restore();
   }
 
+  function firingVisualForTank(team, now) {
+    if (!animation || animation.packet?.shooter !== team) {
+      const liveLocalAngle = team === localTeam() && canLocalAct() ? Number(dom.angleInput.value) : NaN;
+      return {
+        angle: Number.isFinite(liveLocalAngle) ? liveLocalAngle : gameState.tanks[team].angle,
+        offsetX: 0,
+        offsetY: 0,
+        shake: 0
+      };
+    }
+    const packet = animation.packet;
+    if (animation.phase === "aim") {
+      const p = clamp((now - animation.phaseStart) / animation.aimDuration, 0, 1);
+      const eased = p < .5 ? 2 * p * p : 1 - ((-2 * p + 2) ** 2) / 2;
+      return { angle: animation.fromAngle + (packet.angle - animation.fromAngle) * eased, offsetX: 0, offsetY: 0, shake: 0 };
+    }
+    if (animation.phase === "recoil") {
+      const p = clamp((now - animation.phaseStart) / animation.recoilDuration, 0, 1);
+      const worldAngle = worldAngleForTeam(team, packet.angle) * Math.PI / 180;
+      const kick = Math.sin(Math.PI * Math.min(1, p * 1.45)) * Math.max(2.5, tankWorldWidth() * canvasMetrics().sx * .09);
+      const shake = (1 - p) * Math.sin(p * 72) * 1.6;
+      return {
+        angle: packet.angle,
+        offsetX: -Math.cos(worldAngle) * kick + shake,
+        offsetY: Math.sin(worldAngle) * kick + shake * .28,
+        shake
+      };
+    }
+    return { angle: packet.angle, offsetX: 0, offsetY: 0, shake: 0 };
+  }
+
   function drawTank(team, now) {
     const tank = gameState.tanks[team];
     const displayX = displayTankX(team, now);
     const ground = terrainAt(displayX);
-    const groundPoint = worldToCanvas(displayX, ground);
+    const baseGroundPoint = worldToCanvas(displayX, ground);
+    const firingVisual = firingVisualForTank(team, now);
+    const groundPoint = {
+      x: baseGroundPoint.x + firingVisual.offsetX,
+      y: baseGroundPoint.y + firingVisual.offsetY
+    };
     const metrics = canvasMetrics();
     const bodyWidth = Math.max(0.45, tankWorldWidth() * metrics.sx);
     const bodyHeight = Math.max(0.28, tankWorldHeight() * metrics.sy);
@@ -3628,8 +3699,12 @@
     const rollPhase = movementProgress * Math.PI * 8 * rollDirection;
 
     const center = { x: displayX, y: terrainAt(displayX) + tankWorldHeight() * .80 };
-    const turretPoint = worldToCanvas(center.x, center.y);
-    const barrelAngle = -(worldAngleForTeam(team, tank.angle) * Math.PI / 180);
+    const baseTurretPoint = worldToCanvas(center.x, center.y);
+    const turretPoint = {
+      x: baseTurretPoint.x + firingVisual.offsetX,
+      y: baseTurretPoint.y + firingVisual.offsetY
+    };
+    const barrelAngle = -(worldAngleForTeam(team, firingVisual.angle) * Math.PI / 180);
     const barrelLength = bodyWidth * 1.08;
     const barrelThickness = Math.max(.55, bodyHeight * .13);
 
@@ -3947,8 +4022,6 @@
     const team = localTeam();
     const angle = Number(dom.angleInput.value);
     const power = Number(dom.powerInput.value);
-    gameState.tanks[team].angle = angle;
-    gameState.tanks[team].power = power;
     const origin = muzzlePosition(gameState, team, angle);
     const radians = worldAngleForTeam(team, angle) * Math.PI / 180;
     let x = origin.x;
@@ -3973,11 +4046,96 @@
     ctx.restore();
   }
 
+  function drawFiringSequenceLabel(packet, text, progress = 1) {
+    const tank = gameState.tanks[packet.shooter];
+    const center = worldToCanvas(tank.x, terrainAt(tank.x) + tankWorldHeight() * 2.45);
+    const alpha = Math.sin(Math.PI * clamp(progress, .08, .92));
+    ctx.save();
+    ctx.globalAlpha = .35 + alpha * .65;
+    ctx.font = `900 ${Math.max(10, Math.min(18, dom.canvas.width / 70))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const width = ctx.measureText(text).width + 20;
+    ctx.fillStyle = "rgba(8,13,22,.84)";
+    roundedRect(ctx, center.x - width / 2, center.y - 15, width, 30, 5);
+    ctx.fill();
+    ctx.strokeStyle = packet.shooter === "blue" ? "rgba(79,164,255,.85)" : "rgba(255,92,99,.85)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.fillStyle = "#f3f6fb";
+    ctx.fillText(text, center.x, center.y + 1);
+    ctx.restore();
+  }
+
+  function drawMuzzleFlash(packet, progress) {
+    if (progress > .62) return;
+    const muzzle = muzzlePosition(gameState, packet.shooter, packet.angle);
+    const p = worldToCanvas(muzzle.x, muzzle.y);
+    const worldAngle = worldAngleForTeam(packet.shooter, packet.angle) * Math.PI / 180;
+    const forwardX = Math.cos(worldAngle);
+    const forwardY = -Math.sin(worldAngle);
+    const intensity = 1 - progress / .62;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 28 + 34 * intensity);
+    glow.addColorStop(0, "rgba(255,255,235,.98)");
+    glow.addColorStop(.25, "rgba(255,196,78,.92)");
+    glow.addColorStop(1, "rgba(255,85,20,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 30 + 30 * intensity, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,224,126,.92)";
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + forwardX * (42 + 34 * intensity) + forwardY * 12, p.y + forwardY * (42 + 34 * intensity) - forwardX * 12);
+    ctx.lineTo(p.x + forwardX * (64 + 44 * intensity), p.y + forwardY * (64 + 44 * intensity));
+    ctx.lineTo(p.x + forwardX * (42 + 34 * intensity) - forwardY * 12, p.y + forwardY * (42 + 34 * intensity) + forwardX * 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   function drawProjectileAnimation(now) {
     if (!animation) return;
-    const elapsed = now - animation.start;
     const packet = animation.packet;
 
+    if (animation.phase === "aim") {
+      const progress = clamp((now - animation.phaseStart) / animation.aimDuration, 0, 1);
+      const shownAngle = animation.fromAngle + (packet.angle - animation.fromAngle) * progress;
+      drawFiringSequenceLabel(packet, `ANGLE ${formatAimAngle(shownAngle)}`, progress);
+      if (progress >= 1) {
+        gameState.tanks[packet.shooter].angle = packet.angle;
+        animation.phase = "charge";
+        animation.phaseStart = now;
+      }
+      return;
+    }
+
+    if (animation.phase === "charge") {
+      const progress = clamp((now - animation.phaseStart) / animation.chargeDuration, 0, 1);
+      const shownPower = Math.round(animation.fromPower + (packet.power - animation.fromPower) * progress);
+      drawFiringSequenceLabel(packet, `POWER ${shownPower}`, progress);
+      if (progress >= 1) {
+        gameState.tanks[packet.shooter].power = packet.power;
+        animation.phase = "recoil";
+        animation.phaseStart = now;
+        if (!animation.fireSoundPlayed) {
+          animation.fireSoundPlayed = true;
+          playFireSound();
+        }
+      }
+      return;
+    }
+
+    if (animation.phase === "recoil") {
+      const progress = clamp((now - animation.phaseStart) / animation.recoilDuration, 0, 1);
+      drawMuzzleFlash(packet, progress);
+      if (progress >= 1) beginTravelPhase(now);
+      return;
+    }
+
+    const elapsed = now - animation.start;
     if (animation.phase === "travel") {
       const rawProgress = clamp(elapsed / animation.travelDuration, 0, 1);
       const progress = packet.deployRequested ? Math.min(rawProgress, .96) : rawProgress;
@@ -4201,7 +4359,7 @@
   function updateDoubleStrikeButton() {
     dom.doubleStrikeButton.classList.toggle("active", doubleStrikeSelected);
     dom.doubleStrikeButton.setAttribute("aria-pressed", String(doubleStrikeSelected));
-    dom.doubleStrikeButton.querySelector("span").textContent = doubleStrikeSelected ? "DOUBLE STRIKE ARMED" : "DOUBLE STRIKE";
+    dom.doubleStrikeButton.querySelector("span").innerHTML = doubleStrikeSelected ? "DOUBLE<br>ARMED" : "DOUBLE<br>STRIKE";
   }
 
   function toggleDoubleStrike() {
@@ -4261,8 +4419,8 @@
   dom.angleDecreaseButton.addEventListener("click", () => nudgeAimControl(dom.angleInput, -1));
   dom.angleIncreaseButton.addEventListener("click", () => nudgeAimControl(dom.angleInput, 1));
   dom.powerInput.addEventListener("input", updateAimOutputs);
-  dom.powerDecreaseButton.addEventListener("click", () => nudgeAimControl(dom.powerInput, -5));
-  dom.powerIncreaseButton.addEventListener("click", () => nudgeAimControl(dom.powerInput, 5));
+  dom.powerDecreaseButton.addEventListener("click", () => nudgeAimControl(dom.powerInput, -1));
+  dom.powerIncreaseButton.addEventListener("click", () => nudgeAimControl(dom.powerInput, 1));
   dom.fireButton.addEventListener("click", requestFire);
   dom.doubleStrikeButton.addEventListener("click", toggleDoubleStrike);
   dom.standardWeaponButton.addEventListener("click", () => armWeapon("standard"));
@@ -4282,6 +4440,7 @@
   dom.gameLocationSelect.addEventListener("change", updateGameControls);
   dom.changeWorldButton.addEventListener("click", requestWorldChange);
   dom.replayRequestButton.addEventListener("click", () => requestRoundAction("replay"));
+  dom.roundOverReplayButton.addEventListener("click", () => requestRoundAction("replay"));
   dom.returnMenuButton.addEventListener("click", returnToMenuPreservingSession);
   dom.modalCloseButton.addEventListener("click", closeCanvasModal);
   dom.purchaseConfirmButton.addEventListener("click", closeCanvasModal);
@@ -4343,6 +4502,7 @@
       const pausedFor = now - hiddenAt;
       if (animation) {
         animation.start += pausedFor;
+        if (animation.phaseStart) animation.phaseStart += pausedFor;
         if (animation.explosionStart) animation.explosionStart += pausedFor;
       }
       if (movementAnimation) movementAnimation.start += pausedFor;
