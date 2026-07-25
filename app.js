@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 16;
+  const APP_VERSION = 17;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -178,7 +178,6 @@
     teleportCount: $("teleportCount"),
     engineStatus: $("engineStatus"),
     repairCount: $("repairCount"),
-    telemetryWind: $("telemetryWind"),
     telemetryGravity: $("telemetryGravity"),
     telemetryMove: $("telemetryMove"),
     telemetryHits: $("telemetryHits"),
@@ -562,12 +561,14 @@
       if (dom.chatPanel.parentElement !== dom.menuChatDock) dom.menuChatDock.appendChild(dom.chatPanel);
       dom.menuChatDock.classList.remove("hidden");
       togglePanel(dom.chatPanel, false);
+      ensureChatInteractive();
     } else {
       if (dom.chatPanel.parentElement !== dom.sideColumn) {
         const battlefieldPanel = dom.sideColumn.querySelector('[data-panel="battlefield"]');
         dom.sideColumn.insertBefore(dom.chatPanel, battlefieldPanel || dom.sideColumn.children[1] || null);
       }
       dom.menuChatDock.classList.add("hidden");
+      ensureChatInteractive();
     }
   }
 
@@ -1658,7 +1659,7 @@
       parts.role.textContent = team === localTeam() ? "YOU" : team === "blue" ? "HOST" : role === "bot" && team === "red" ? "BOT" : TEAM_NAMES[team].toUpperCase();
       renderRecentPlayerActions(team);
     }
-    dom.connectionBadge.textContent = role === "bot" ? "LOCAL" : `${stateTeams().length}P P2P`;
+    if (dom.connectionBadge) dom.connectionBadge.textContent = role === "bot" ? "LOCAL" : `${stateTeams().length}P P2P`;
     dom.roundControlBadge.textContent = role === "bot" ? "LOCAL" : role === "host" ? "HOST" : "REQUEST";
     dom.roundControlNote.textContent = role === "bot"
       ? "World changes and map resets happen immediately against the bot."
@@ -1739,10 +1740,9 @@
     const turnSuffix = gameState.turnsRemaining > 1 ? ` · ${gameState.turnsRemaining} SHOTS` : "";
     dom.turnLabel.textContent = gameState.winner ? `${playerLabel(gameState.winner).toUpperCase()} WINS` : `${turnName} TURN${turnSuffix}`;
     dom.windLabel.textContent = formatWind(gameState.wind);
-    dom.telemetryWind.textContent = signed(gameState.wind);
-    dom.telemetryGravity.textContent = settings.gravity.toFixed(2);
-    dom.telemetryMove.textContent = moveStep().toFixed(1);
-    dom.telemetryHits.textContent = String(settings.hitsToDestroy);
+    if (dom.telemetryGravity) dom.telemetryGravity.textContent = settings.gravity.toFixed(2);
+    if (dom.telemetryMove) dom.telemetryMove.textContent = moveStep().toFixed(1);
+    if (dom.telemetryHits) dom.telemetryHits.textContent = String(settings.hitsToDestroy);
     dom.roundNumber.textContent = String(gameState.round);
 
     if (dom.scoreboardStrip) {
@@ -4961,7 +4961,7 @@
     const armoury = dom.sideColumn.querySelector('[data-panel="armoury"]');
     dom.sideColumn.querySelectorAll(".collapsible-panel").forEach(panel => {
       delete panel.dataset.autoPrepared;
-      if (panel.dataset.panel === "armoury" || panel.dataset.panel === "telemetry") setPanelCollapsed(panel, false);
+      if (panel.dataset.panel === "armoury") setPanelCollapsed(panel, false);
       else if (panel.dataset.panel === "chat") setPanelCollapsed(panel, window.innerWidth <= 720);
       else setPanelCollapsed(panel, true);
     });
@@ -4977,10 +4977,18 @@
       if (!panel.dataset.autoPrepared) {
         panel.dataset.autoPrepared = "true";
         if (panel.dataset.panel === "log" || panel.dataset.panel === "battlefield") setPanelCollapsed(panel, true);
-        if (panel.dataset.panel === "armoury" || panel.dataset.panel === "telemetry") setPanelCollapsed(panel, false);
+        if (panel.dataset.panel === "armoury") setPanelCollapsed(panel, false);
         if ((short || narrow) && panel.dataset.panel === "chat") setPanelCollapsed(panel, true);
       }
     });
+  }
+
+  function ensureChatInteractive() {
+    if (!dom.chatInput || !dom.chatForm) return;
+    dom.chatInput.disabled = false;
+    dom.chatInput.readOnly = false;
+    dom.chatInput.removeAttribute("inert");
+    dom.chatForm.removeAttribute("inert");
   }
 
   function toggleChatPanel() {
@@ -4988,9 +4996,14 @@
     if (currentScreen === "home" && hasLiveSession()) placePersistentChat("home");
     const opening = dom.chatPanel.classList.contains("collapsed") || (window.innerWidth <= 720 && !dom.chatPanel.classList.contains("mobile-open"));
     if (window.innerWidth <= 720) dom.chatPanel.classList.toggle("mobile-open", opening);
+    else dom.chatPanel.classList.remove("mobile-open");
     setPanelCollapsed(dom.chatPanel, !opening);
     dom.chatToolButton?.classList.toggle("active", opening);
-    if (opening) setTimeout(() => dom.chatInput?.focus(), 80);
+    ensureChatInteractive();
+    if (opening) setTimeout(() => {
+      ensureChatInteractive();
+      dom.chatInput?.focus({ preventScroll: true });
+    }, 80);
     markCanvasResize();
   }
 
@@ -5101,6 +5114,12 @@
   dom.engineUpgradeButton.addEventListener("click", () => requestArmouryItem("engine"));
   dom.repairKitButton.addEventListener("click", () => requestArmouryItem("repair"));
   dom.chatForm.addEventListener("submit", submitChat);
+  dom.chatInput.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      dom.chatForm.requestSubmit();
+    }
+  });
   dom.soundButton.addEventListener("click", toggleSound);
   dom.chatToolButton.addEventListener("click", toggleChatPanel);
   dom.armouryToolButton.addEventListener("click", toggleArmouryPanel);

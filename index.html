@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-to-four player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v16</title>
-  <link rel="stylesheet" href="style.css?v=16">
+  <title>Red vs Blue — P2P Tanks v17</title>
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
   <div id="app" class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
         <span class="brand-kicker">PEER-TO-PEER ARTILLERY</span>
-        <img class="brand-logo" src="red-vs-blue-logo.png?v=16" alt="Red vs Blue tank battle">
+        <img class="brand-logo" src="red-vs-blue-logo.png?v=17" alt="Red vs Blue tank battle">
       </div>
       <div id="connectionPill" class="connection-pill offline">
         <span class="connection-dot"></span>
@@ -187,8 +187,16 @@
           <section class="battle-column">
             <div class="battle-hud">
               <div class="turn-card">
-                <span id="turnLabel">BLUE TURN</span>
-                <strong id="windLabel">WIND 0.0 →</strong>
+                <div class="turn-primary">
+                  <span id="turnLabel">BLUE TURN</span>
+                  <span id="connectionBadge" class="mini-badge">LOCAL</span>
+                </div>
+                <div class="turn-telemetry" aria-label="Battlefield telemetry">
+                  <strong id="windLabel">WIND 0.0 →</strong>
+                  <span>GRAVITY <b id="telemetryGravity">9.81</b></span>
+                  <span>MOVE <b id="telemetryMove">2.8</b></span>
+                  <span>HITS <b id="telemetryHits">3</b></span>
+                </div>
                 <div id="scoreboardStrip" class="scoreboard-strip" aria-label="Running match score">
                   <span class="score-round">ROUND <b id="roundNumber">1</b></span>
                 </div>
@@ -308,24 +316,6 @@
           </section>
 
           <aside id="sideColumn" class="side-column">
-            <section class="panel compact-panel telemetry-panel collapsible-panel" data-panel="telemetry">
-              <div class="panel-heading compact">
-                <div>
-                  <p class="eyebrow">SHOT COMPUTER</p>
-                  <h3>Telemetry</h3>
-                </div>
-                <div class="panel-heading-actions"><span id="connectionBadge" class="mini-badge">LOCAL</span><button class="collapse-button" type="button" aria-label="Collapse telemetry" title="Collapse panel">−</button></div>
-              </div>
-              <div class="panel-body">
-              <dl class="telemetry-grid">
-                <div><dt>Current wind</dt><dd id="telemetryWind">0.0</dd></div>
-                <div><dt>Gravity</dt><dd id="telemetryGravity">9.81</dd></div>
-                <div><dt>Move step</dt><dd id="telemetryMove">2.8</dd></div>
-                <div><dt>Hits needed</dt><dd id="telemetryHits">3</dd></div>
-              </dl>
-              </div>
-            </section>
-
 
             <section class="panel compact-panel armoury-panel collapsible-panel" data-panel="armoury">
               <div class="panel-heading compact">
@@ -357,8 +347,8 @@
               <div class="panel-body chat-panel-body">
                 <div id="chatLog" class="chat-log" role="log" aria-live="polite"></div>
                 <form id="chatForm" class="chat-form">
-                  <input id="chatInput" type="text" maxlength="180" autocomplete="off" placeholder="Type a message…" aria-label="Chat message">
-                  <button type="submit" aria-label="Send message">➤</button>
+                  <textarea id="chatInput" rows="1" maxlength="180" autocomplete="off" spellcheck="true" placeholder="Type a message…" aria-label="Chat message"></textarea>
+                  <button type="submit" aria-label="Send message"><span>SEND</span></button>
                 </form>
               </div>
             </section>
@@ -416,6 +406,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>
