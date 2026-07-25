@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const APP_VERSION = 13;
+  const APP_VERSION = 14;
   const PREFIX = "sam-red-blue-tanks-";
   const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const WORLD_HEIGHT = 100;
@@ -79,6 +79,12 @@
     redHits: $("redHits"),
     blueCredits: $("blueCredits"),
     redCredits: $("redCredits"),
+    blueStatusTankCanvas: $("blueStatusTankCanvas"),
+    redStatusTankCanvas: $("redStatusTankCanvas"),
+    blueIntegrityLabel: $("blueIntegrityLabel"),
+    redIntegrityLabel: $("redIntegrityLabel"),
+    blueIntegrityFill: $("blueIntegrityFill"),
+    redIntegrityFill: $("redIntegrityFill"),
     turnLabel: $("turnLabel"),
     windLabel: $("windLabel"),
     blueScore: $("blueScore"),
@@ -1359,6 +1365,9 @@
     updateArmouryUI();
     renderHitPips(dom.blueHits, tanks.blue.hits, settings.hitsToDestroy);
     renderHitPips(dom.redHits, tanks.red.hits, settings.hitsToDestroy);
+    updateIntegrityReadout("blue");
+    updateIntegrityReadout("red");
+    drawStatusTankPanels(performance.now());
 
     if (syncControls) {
       const tank = tanks[localTeam()];
@@ -1384,6 +1393,140 @@
     if (role === "bot" && gameState.turn === "red" && !gameState.winner && !animation) scheduleBotTurn();
     invalidateStaticLayer();
     requestRender();
+  }
+
+  function updateIntegrityReadout(team) {
+    if (!gameState) return;
+    const hitsNeeded = Math.max(1, gameState.settings.hitsToDestroy);
+    const hits = clamp(gameState.tanks[team].hits || 0, 0, hitsNeeded);
+    const integrity = Math.max(0, Math.round((1 - hits / hitsNeeded) * 100));
+    const label = team === "blue" ? dom.blueIntegrityLabel : dom.redIntegrityLabel;
+    const fill = team === "blue" ? dom.blueIntegrityFill : dom.redIntegrityFill;
+    if (label) label.textContent = `${integrity}%`;
+    if (fill) {
+      fill.style.width = `${integrity}%`;
+      fill.dataset.level = integrity <= 25 ? "critical" : integrity <= 55 ? "damaged" : "sound";
+    }
+  }
+
+  function statusTankAngle(team, now) {
+    if (!animation || animation.packet?.shooter !== team) return gameState?.tanks?.[team]?.angle || (team === "blue" ? 45 : -45);
+    if (animation.phase === "aim") {
+      const p = clamp((now - animation.phaseStart) / animation.aimDuration, 0, 1);
+      const eased = p < .5 ? 2 * p * p : 1 - ((-2 * p + 2) ** 2) / 2;
+      return animation.fromAngle + (animation.packet.angle - animation.fromAngle) * eased;
+    }
+    return animation.packet.angle;
+  }
+
+  function drawStatusTankPanels(now = performance.now()) {
+    if (!gameState) return;
+    drawStatusTank("blue", dom.blueStatusTankCanvas, now);
+    drawStatusTank("red", dom.redStatusTankCanvas, now);
+  }
+
+  function drawStatusTank(team, canvas, now) {
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    const tank = gameState.tanks[team];
+    const hitsNeeded = Math.max(1, gameState.settings.hitsToDestroy);
+    const integrity = Math.max(0, 1 - (tank.hits || 0) / hitsNeeded);
+    const angle = statusTankAngle(team, now);
+    const directionAngle = worldAngleForTeam(team, angle) * Math.PI / 180;
+    const recoil = animation?.packet?.shooter === team && animation.phase === "recoil"
+      ? Math.sin(Math.PI * clamp((now - animation.phaseStart) / animation.recoilDuration, 0, 1)) * 5
+      : 0;
+    const bodyX = team === "blue" ? 48 - Math.cos(directionAngle) * recoil : width - 48 - Math.cos(directionAngle) * recoil;
+    const bodyY = height - 14 + Math.sin(directionAngle) * recoil * .25;
+    const accent = team === "blue" ? "#4f9ed0" : "#c75452";
+    const darkAccent = team === "blue" ? "#254e65" : "#642a29";
+
+    context.clearRect(0, 0, width, height);
+    context.save();
+    context.globalAlpha = tank.alive ? .98 : .72;
+    context.strokeStyle = "rgba(255,255,255,.08)";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(3, height - 5.5);
+    context.lineTo(width - 3, height - 5.5);
+    context.stroke();
+
+    context.fillStyle = "#111514";
+    roundedRect(context, bodyX - 33, bodyY - 7, 66, 13, 4);
+    context.fill();
+    context.strokeStyle = "#626861";
+    context.stroke();
+    for (let i = -25; i <= 25; i += 10) {
+      context.fillStyle = "#333936";
+      context.beginPath();
+      context.arc(bodyX + i, bodyY, 4, 0, Math.PI * 2);
+      context.fill();
+      context.strokeStyle = "#777b72";
+      context.stroke();
+    }
+
+    context.fillStyle = darkAccent;
+    context.beginPath();
+    context.moveTo(bodyX - 27, bodyY - 9);
+    context.lineTo(bodyX - 18, bodyY - 19);
+    context.lineTo(bodyX + 22, bodyY - 18);
+    context.lineTo(bodyX + 30, bodyY - 9);
+    context.closePath();
+    context.fill();
+    context.strokeStyle = accent;
+    context.stroke();
+
+    const turretX = bodyX + (team === "blue" ? 4 : -4);
+    const turretY = bodyY - 20;
+    context.save();
+    context.translate(turretX, turretY);
+    context.rotate(-directionAngle);
+    context.fillStyle = "#777b72";
+    context.fillRect(0, -2.1, 42, 4.2);
+    context.fillStyle = "#242825";
+    context.fillRect(35, -4, 9, 8);
+    context.restore();
+    context.fillStyle = accent;
+    context.beginPath();
+    context.ellipse(turretX, turretY, 15, 7, 0, 0, Math.PI * 2);
+    context.fill();
+    context.strokeStyle = "#202421";
+    context.stroke();
+
+    if (integrity < .72) {
+      context.strokeStyle = "rgba(20,20,18,.9)";
+      context.lineWidth = 1.5;
+      const cracks = integrity < .35 ? 4 : 2;
+      for (let i = 0; i < cracks; i += 1) {
+        const x = bodyX - 15 + i * 10;
+        context.beginPath();
+        context.moveTo(x, bodyY - 16);
+        context.lineTo(x + 5, bodyY - 10);
+        context.lineTo(x + 1, bodyY - 5);
+        context.stroke();
+      }
+    }
+
+    if (!tank.alive) {
+      context.fillStyle = "rgba(20,20,18,.52)";
+      context.fillRect(bodyX - 30, bodyY - 20, 60, 25);
+      context.strokeStyle = "#ddd9cd";
+      context.lineWidth = 1.4;
+      context.beginPath();
+      context.moveTo(bodyX, bodyY - 23);
+      context.lineTo(bodyX, bodyY - 44);
+      context.stroke();
+      context.fillStyle = "#ece9df";
+      context.beginPath();
+      context.moveTo(bodyX, bodyY - 44);
+      context.lineTo(bodyX + (team === "blue" ? 15 : -15), bodyY - 39);
+      context.lineTo(bodyX, bodyY - 34);
+      context.closePath();
+      context.fill();
+    }
+    context.restore();
   }
 
   function updateTeamLoadout(team) {
@@ -2184,14 +2327,22 @@
       phaseStart: now,
       fromAngle,
       fromPower,
-      aimDuration: Math.abs(packet.angle - fromAngle) > 0.5 ? 620 : 260,
-      chargeDuration: Math.abs(packet.power - fromPower) > 0.5 ? 520 : 340,
-      recoilDuration: 470,
-      travelDuration: clamp(packet.trajectory.length * 9.5, 1050, 5200),
+      aimDuration: Math.abs(packet.angle - fromAngle) > 0.5
+        ? clamp(900 + Math.abs(packet.angle - fromAngle) * 9, 1000, 1700)
+        : 520,
+      chargeDuration: Math.abs(packet.power - fromPower) > 0.5
+        ? clamp(560 + Math.abs(packet.power - fromPower) * 2.4, 650, 1050)
+        : 420,
+      recoilDuration: 680,
+      travelDuration: clamp(packet.trajectory.length * 11.5, 1350, 6200),
       explosionDuration: packet.impact && packet.impact.type !== "out" ? (packet.weapon === "bigBertha" ? 1100 : 720) : 220,
       phase: "aim",
-      fireSoundPlayed: false
+      fireSoundPlayed: false,
+      powerSoundPlayed: false
     };
+    if (Math.abs(packet.angle - fromAngle) > 0.5) {
+      playTurretCrankSound(animation.aimDuration, packet.angle - fromAngle);
+    }
     const weaponText = packet.weapon && packet.weapon !== "standard" ? ` ${weaponLabel(packet.weapon)}` : packet.doubleStrike ? " a DOUBLE STRIKE" : "";
     addEvent(`${TEAM_NAMES[packet.shooter]} prepared${weaponText}: ${formatAimAngle(packet.angle)}, power ${Math.round(packet.power)}.`);
     updateGameControls();
@@ -2982,6 +3133,31 @@
     source.start();
   }
 
+  function playTurretCrankSound(durationMs, angleDelta) {
+    if (!soundEnabled || Math.abs(angleDelta) < .5) return;
+    const duration = Math.max(.25, durationMs / 1000);
+    const steps = Math.min(18, Math.max(5, Math.round(Math.abs(angleDelta) / 5)));
+    const interval = duration / steps;
+    const directionLift = angleDelta >= 0 ? 18 : -12;
+    for (let i = 0; i < steps; i += 1) {
+      const delay = i * interval;
+      tone(116 + directionLift + (i % 3) * 9, Math.min(.055, interval * .68), "square", .009, delay);
+      tone(64 + (i % 2) * 6, Math.min(.045, interval * .55), "triangle", .007, delay + .012);
+    }
+  }
+
+  function playPowerSetSound(durationMs, powerDelta) {
+    if (!soundEnabled || Math.abs(powerDelta) < .5) return;
+    const duration = Math.max(.25, durationMs / 1000);
+    const steps = Math.min(12, Math.max(4, Math.round(Math.abs(powerDelta) / 14)));
+    const interval = duration / steps;
+    for (let i = 0; i < steps; i += 1) {
+      const delay = i * interval;
+      const rise = powerDelta >= 0 ? i * 5 : (steps - i) * 5;
+      tone(180 + rise, Math.min(.045, interval * .62), "sawtooth", .0065, delay);
+    }
+  }
+
   function playFireSound() {
     noiseBurst(.12, .035);
     tone(145, .13, "sawtooth", .055);
@@ -3221,6 +3397,7 @@
     drawInspectionReticle(now);
     drawProjectileAnimation(now);
     drawVignette();
+    drawStatusTankPanels(now);
     activeCanvasMetrics = null;
   }
 
@@ -3655,8 +3832,8 @@
     if (animation.phase === "recoil") {
       const p = clamp((now - animation.phaseStart) / animation.recoilDuration, 0, 1);
       const worldAngle = worldAngleForTeam(team, packet.angle) * Math.PI / 180;
-      const kick = Math.sin(Math.PI * Math.min(1, p * 1.45)) * Math.max(2.5, tankWorldWidth() * canvasMetrics().sx * .09);
-      const shake = (1 - p) * Math.sin(p * 72) * 1.6;
+      const kick = Math.sin(Math.PI * p) * Math.max(2.2, tankWorldWidth() * canvasMetrics().sx * .075);
+      const shake = (1 - p) * Math.sin(p * 18) * .55;
       return {
         angle: packet.angle,
         offsetX: -Math.cos(worldAngle) * kick + shake,
@@ -4068,31 +4245,46 @@
   }
 
   function drawMuzzleFlash(packet, progress) {
-    if (progress > .62) return;
+    if (progress > .46) return;
     const muzzle = muzzlePosition(gameState, packet.shooter, packet.angle);
     const p = worldToCanvas(muzzle.x, muzzle.y);
     const worldAngle = worldAngleForTeam(packet.shooter, packet.angle) * Math.PI / 180;
     const forwardX = Math.cos(worldAngle);
     const forwardY = -Math.sin(worldAngle);
-    const intensity = 1 - progress / .62;
+    const intensity = 1 - progress / .46;
     ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 28 + 34 * intensity);
-    glow.addColorStop(0, "rgba(255,255,235,.98)");
-    glow.addColorStop(.25, "rgba(255,196,78,.92)");
-    glow.addColorStop(1, "rgba(255,85,20,0)");
+    ctx.globalAlpha = .35 + intensity * .45;
+    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 10 + 13 * intensity);
+    glow.addColorStop(0, "rgba(255,244,190,.88)");
+    glow.addColorStop(.4, "rgba(238,139,52,.55)");
+    glow.addColorStop(1, "rgba(180,72,24,0)");
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 30 + 30 * intensity, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, 11 + 13 * intensity, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "rgba(255,224,126,.92)";
+    ctx.fillStyle = "rgba(242,167,70,.72)";
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
-    ctx.lineTo(p.x + forwardX * (42 + 34 * intensity) + forwardY * 12, p.y + forwardY * (42 + 34 * intensity) - forwardX * 12);
-    ctx.lineTo(p.x + forwardX * (64 + 44 * intensity), p.y + forwardY * (64 + 44 * intensity));
-    ctx.lineTo(p.x + forwardX * (42 + 34 * intensity) - forwardY * 12, p.y + forwardY * (42 + 34 * intensity) + forwardX * 12);
+    ctx.lineTo(p.x + forwardX * (22 + 18 * intensity) + forwardY * 5, p.y + forwardY * (22 + 18 * intensity) - forwardX * 5);
+    ctx.lineTo(p.x + forwardX * (34 + 22 * intensity), p.y + forwardY * (34 + 22 * intensity));
+    ctx.lineTo(p.x + forwardX * (22 + 18 * intensity) - forwardY * 5, p.y + forwardY * (22 + 18 * intensity) + forwardX * 5);
     ctx.closePath();
     ctx.fill();
+
+    const smokeProgress = clamp(progress / .46, 0, 1);
+    ctx.globalAlpha = .24 * (1 - smokeProgress);
+    ctx.fillStyle = "#a7aaa3";
+    for (let i = 0; i < 4; i += 1) {
+      const drift = 9 + i * 7 + smokeProgress * 14;
+      ctx.beginPath();
+      ctx.arc(
+        p.x + forwardX * drift + forwardY * (i - 1.5) * 3,
+        p.y + forwardY * drift - forwardX * (i - 1.5) * 3 - smokeProgress * 5,
+        3 + i * 1.15 + smokeProgress * 3,
+        0, Math.PI * 2
+      );
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -4102,20 +4294,20 @@
 
     if (animation.phase === "aim") {
       const progress = clamp((now - animation.phaseStart) / animation.aimDuration, 0, 1);
-      const shownAngle = animation.fromAngle + (packet.angle - animation.fromAngle) * progress;
-      drawFiringSequenceLabel(packet, `ANGLE ${formatAimAngle(shownAngle)}`, progress);
       if (progress >= 1) {
         gameState.tanks[packet.shooter].angle = packet.angle;
         animation.phase = "charge";
         animation.phaseStart = now;
+        if (!animation.powerSoundPlayed && Math.abs(packet.power - animation.fromPower) > 0.5) {
+          animation.powerSoundPlayed = true;
+          playPowerSetSound(animation.chargeDuration, packet.power - animation.fromPower);
+        }
       }
       return;
     }
 
     if (animation.phase === "charge") {
       const progress = clamp((now - animation.phaseStart) / animation.chargeDuration, 0, 1);
-      const shownPower = Math.round(animation.fromPower + (packet.power - animation.fromPower) * progress);
-      drawFiringSequenceLabel(packet, `POWER ${shownPower}`, progress);
       if (progress >= 1) {
         gameState.tanks[packet.shooter].power = packet.power;
         animation.phase = "recoil";

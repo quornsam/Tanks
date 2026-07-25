@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111827">
   <meta name="description" content="A two-player peer-to-peer turn-based artillery game for modern browsers.">
-  <title>Red vs Blue — P2P Tanks v13</title>
-  <link rel="stylesheet" href="style.css?v=13">
+  <title>Red vs Blue — P2P Tanks v14</title>
+  <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -176,6 +176,10 @@
             <div class="battle-hud">
               <div id="blueTankCard" class="tank-card blue-card">
                 <div class="tank-card-title"><span class="team-swatch blue"></span><strong>BLUE</strong><span id="blueRoleLabel">HOST</span></div>
+                <div class="tank-card-visual-row">
+                  <canvas id="blueStatusTankCanvas" class="status-tank-canvas" width="180" height="52" aria-label="Blue tank orientation and condition"></canvas>
+                  <div class="integrity-readout"><span>INTEGRITY</span><strong id="blueIntegrityLabel">100%</strong><i><b id="blueIntegrityFill"></b></i></div>
+                </div>
                 <div id="blueLoadout" class="team-loadout" aria-label="Blue purchases"><span class="loadout-empty">NO PURCHASES</span></div>
                 <div class="tank-card-status"><div id="blueHits" class="hit-pips" aria-label="Blue tank damage"></div><span id="blueCredits" class="credit-readout">0 CR</span></div>
               </div>
@@ -192,6 +196,10 @@
 
               <div id="redTankCard" class="tank-card red-card">
                 <div class="tank-card-title"><span id="redRoleLabel">GUEST</span><strong>RED</strong><span class="team-swatch red"></span></div>
+                <div class="tank-card-visual-row red-visual-row">
+                  <div class="integrity-readout"><span>INTEGRITY</span><strong id="redIntegrityLabel">100%</strong><i><b id="redIntegrityFill"></b></i></div>
+                  <canvas id="redStatusTankCanvas" class="status-tank-canvas" width="180" height="52" aria-label="Red tank orientation and condition"></canvas>
+                </div>
                 <div id="redLoadout" class="team-loadout" aria-label="Red purchases"><span class="loadout-empty">NO PURCHASES</span></div>
                 <div class="tank-card-status"><div id="redHits" class="hit-pips" aria-label="Red tank damage"></div><span id="redCredits" class="credit-readout">0 CR</span></div>
               </div>
@@ -372,6 +380,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>
